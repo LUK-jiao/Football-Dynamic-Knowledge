@@ -1,4 +1,4 @@
-# Football Knowledge Crawler - 动态大模型知识库系统
+# Football Dynamic Knowledge - 动态大模型知识库系统
 
 一个面向足球爱好者的智能知识库系统，集成了数据爬取、知识图谱、向量检索和 RAG（检索增强生成）等功能。
 
