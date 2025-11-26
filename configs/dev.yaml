@@ -1,0 +1,55 @@
+# Development environment configuration
+
+app:
+  env: dev
+  debug: true
+  host: 0.0.0.0
+  port: 8000
+
+database:
+  url: postgresql://user:password@localhost:5432/football_kb_dev
+  pool_size: 5
+  max_overflow: 10
+
+neo4j:
+  uri: bolt://localhost:7687
+  user: neo4j
+  password: password
+  max_connection_lifetime: 3600
+
+redis:
+  url: redis://localhost:6379/0
+  max_connections: 10
+
+celery:
+  broker_url: redis://localhost:6379/1
+  result_backend: redis://localhost:6379/2
+  worker_concurrency: 4
+
+logging:
+  level: DEBUG
+  format: detailed
+  output:
+    - console
+    - file
+
+crawler:
+  max_concurrent: 5
+  timeout: 30
+  retry_attempts: 3
+  delay_between_requests: 1.0
+
+embedding:
+  model: text-embedding-3-small
+  batch_size: 32
+  dimension: 1536
+
+retrieval:
+  top_k: 10
+  similarity_threshold: 0.7
+  hybrid_weight: 0.5
+
+rag:
+  temperature: 0.7
+  max_tokens: 1000
+  context_window: 4000
