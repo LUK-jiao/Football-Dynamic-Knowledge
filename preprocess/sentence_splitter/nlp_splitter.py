@@ -1,6 +1,7 @@
 """
-NLP-based sentence splitter (Validation Layer).
-Uses spaCy for sentence boundary detection.
+NLP-based sentence splitter (PRIMARY LOGIC).
+Uses spaCy for accurate English sentence boundary detection.
+Designed for sports news text.
 """
 
 from typing import List, Optional
@@ -8,50 +9,91 @@ import warnings
 
 
 class NLPSplitter:
-    """Wrapper for spaCy sentence boundary detection."""
+    """
+    Primary sentence segmentation using spaCy.
     
-    def __init__(self):
+    Why spaCy:
+    - State-of-art sentence boundary detection for English
+    - Handles complex structures: quotes, abbreviations, scores
+    - Production-ready and well-maintained
+    - Optimized for news text
+    
+    Recommended models:
+    - en_core_web_trf (transformer-based, most accurate)
+    - en_core_web_sm (smaller, faster, good enough)
+    """
+    
+    def __init__(self, model_name: str = "en_core_web_sm"):
+        """
+        Initialize spaCy NLP pipeline.
+        
+        Args:
+            model_name: spaCy model to use
+        """
+        self.model_name = model_name
         self.nlp = None
         self._initialize_spacy()
     
     def _initialize_spacy(self):
-        """Initialize spaCy model lazily."""
+        """Load spaCy model with sentence segmentation."""
         try:
             import spacy
             try:
-                # Try to load English model
-                self.nlp = spacy.load("en_core_web_sm")
+                # Load the specified model
+                self.nlp = spacy.load(self.model_name)
+                
+                # Ensure sentencizer is enabled
+                if "sentencizer" not in self.nlp.pipe_names and "parser" not in self.nlp.pipe_names:
+                    self.nlp.add_pipe("sentencizer")
+                    
             except OSError:
                 warnings.warn(
-                    "spaCy model 'en_core_web_sm' not found. "
-                    "Install with: python -m spacy download en_core_web_sm"
+                    f"spaCy model '{self.model_name}' not found. "
+                    f"Install with: python -m spacy download {self.model_name}\n"
+                    "Falling back to sentencizer."
                 )
-                self.nlp = None
+                # Fallback: create blank English pipeline with sentencizer
+                self.nlp = spacy.blank("en")
+                self.nlp.add_pipe("sentencizer")
+                
         except ImportError:
-            warnings.warn("spaCy not installed. NLP splitting disabled.")
+            warnings.warn(
+                "spaCy not installed. NLP splitting disabled.\n"
+                "Install with: pip install spacy"
+            )
             self.nlp = None
     
-    def split(self, text: str) -> Optional[List[str]]:
+    def split(self, text: str) -> List[str]:
         """
-        Split text using spaCy sentence segmentation.
+        Split text using spaCy sentence boundary detection.
+        
+        This is the PRIMARY splitting logic. Handles:
+        - Complex punctuation (quotes, dashes, colons)
+        - Abbreviations (U.S., No., Dr., vs.)
+        - Sports scores (3-2, 48.3%)
+        - Dialogue and quotes
         
         Args:
-            text: Input text
+            text: Input text (English sports news)
             
         Returns:
-            List of sentences or None if spaCy unavailable
+            List of sentences detected by spaCy
         """
         if not self.nlp:
-            return None
+            warnings.warn("spaCy not available, returning original text")
+            return [text] if text.strip() else []
         
         if not text or not text.strip():
             return []
         
+        # Process with spaCy
         doc = self.nlp(text.strip())
-        sentences = [sent.text.strip() for sent in doc.sents]
+        
+        # Extract sentences from spaCy doc
+        sentences = [sent.text.strip() for sent in doc.sents if sent.text.strip()]
         
         return sentences
     
     def is_available(self) -> bool:
-        """Check if NLP splitter is available."""
+        """Check if NLP splitter is available and functional."""
         return self.nlp is not None

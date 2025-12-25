@@ -14,11 +14,11 @@ def main():
     
     # Example 1: Complex sports news with multiple facts
     text1 = (
-        "Mikel Arteta's Arsenal side marched on to the EFL Cup semi-finals but did it "
-        "the hard way by winning 8-7 on penalties against Crystal Palace, with Kepa "
-        "Arrizabalaga saving the 16th spot-kick taken by Maxence Lacroix after 15 "
-        "successful conversions."
-    )
+        "After bossing much of the quarter-final against Palace and creating "
+        "the majority of big chances, Arteta's men finally found their breakthrough, "
+        "which came from a corner in the 80th minute. A well-placed delivery into the box from Bukayo Saka "
+        "found the head of Riccardo Calafiori and eventually went into the net off Palace centre-back Lacroix. "   
+        )
     
     print("=" * 80)
     print("Example 1: EFL Cup Match Report")

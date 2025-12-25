@@ -16,7 +16,7 @@ class SplitResolver:
         
         Decision logic:
         1. If NLP results are clearly over-split (too short/fragmentary), reject
-        2. If NLP results reduce fact density significantly, accept
+        2. If NLP results reduce fact density significantly, accept（not over-split &nlp avg len < rule-based avg len)
         3. Default: prefer rule-based (primary logic)
         
         Args:
@@ -30,11 +30,11 @@ class SplitResolver:
         if not nlp_sentences:
             return rule_sentences
         
-        # If rule splitting already fine-grained enough, prefer it
+        # If rule splitting already fine-grained enough, prefer it,jugde by len，pick the one with more sentences
         if len(rule_sentences) >= len(nlp_sentences):
             return rule_sentences
         
-        # Check if NLP over-split (created fragments)
+        # Check if NLP over-split (created fragments),controlled by config.INVALID_START_WORDS
         if self._is_over_split(nlp_sentences):
             return rule_sentences
         

@@ -11,6 +11,18 @@ from . import config
 class SentenceCleaner:
     """Clean and normalize sentence output."""
     
+    def normalize_single(self, text: str) -> str:
+        """
+        Normalize a single piece of text.
+        
+        Args:
+            text: Input text
+            
+        Returns:
+            Normalized text
+        """
+        return self._normalize(text)
+    
     def clean(self, sentences: List[str]) -> List[str]:
         """
         Clean sentence list.

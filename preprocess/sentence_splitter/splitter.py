@@ -1,73 +1,84 @@
 """
 Unified sentence splitting interface.
-Orchestrates the complete pipeline: Rule → NLP → Resolve → Fallback → Clean.
+Refactored pipeline: NLP → Sports Rules → Fallback → Clean
+NLP-first architecture for English sports news.
 """
 
 from typing import List
-from .rule_splitter import RuleSplitter
 from .nlp_splitter import NLPSplitter
-from .resolver import SplitResolver
+from .sports_rules import SportsRuleAdjuster
 from .fallback import FallbackSplitter
 from .cleaner import SentenceCleaner
 
 
 class SentenceSplitter:
     """
-    Production-grade sentence splitter for fact extraction.
+    Production-grade sentence splitter for English sports news.
     
-    Pipeline:
-    1. Rule-based splitting (primary)
-    2. NLP validation (optional)
-    3. Conflict resolution
-    4. Fallback length splitting
-    5. Output cleaning
+    Refactored Pipeline (NLP-First):
+    1. NLP-based sentence segmentation (PRIMARY - spaCy)
+    2. Sports-aware rule adjustment (POST-PROCESSING)
+    3. Fallback length splitting (SAFETY NET)
+    4. Output cleaning
+    
+    Design Principles:
+    - NLP first, rules second
+    - English-specific, sports-aware
+    - Testable, replaceable, extensible
     """
     
-    def __init__(self, use_nlp: bool = True):
+    def __init__(self, enable_sports_rules: bool = True, enable_fallback: bool = True):
         """
-        Initialize splitter pipeline.
+        Initialize NLP-first splitter pipeline.
         
         Args:
-            use_nlp: Whether to use NLP validation layer
+            enable_sports_rules: Apply sports-specific post-processing rules
+            enable_fallback: Enable fallback splitting for oversized sentences
         """
-        self.rule_splitter = RuleSplitter()
-        self.nlp_splitter = NLPSplitter() if use_nlp else None
-        self.resolver = SplitResolver()
-        self.fallback_splitter = FallbackSplitter()
+        # PRIMARY: NLP sentence segmentation
+        self.nlp_splitter = NLPSplitter()
+        
+        # SECONDARY: Sports-aware rule adjustments (post-processing only)
+        self.rule_adjuster = SportsRuleAdjuster() if enable_sports_rules else None
+        
+        # FALLBACK: Length-based emergency splitting
+        self.fallback_splitter = FallbackSplitter() if enable_fallback else None
+        
+        # CLEANUP: Final output normalization
         self.cleaner = SentenceCleaner()
         
     def split(self, text: str) -> List[str]:
         """
-        Split text into fact-oriented sentences.
+        Split English sports news text into semantically complete sentences.
         
         Args:
-            text: Input paragraph
+            text: Input paragraph (English sports news)
             
         Returns:
-            List of clean, fact-oriented sentences
+            List of clean, semantically complete sentences
         """
         if not text or not text.strip():
             return []
         
-        # Step 1: Rule-based splitting (PRIMARY)
-        rule_sentences = self.rule_splitter.split(text)
+        # Step 1: NLP-based sentence segmentation (PRIMARY)
+        sentences = self.nlp_splitter.split(text)
         
-        # Step 2: NLP validation (OPTIONAL)
-        nlp_sentences = None
-        if self.nlp_splitter and self.nlp_splitter.is_available():
-            nlp_sentences = self.nlp_splitter.split(text)
+        if not sentences:
+            # NLP failed - return cleaned original or empty
+            return [self.cleaner.normalize_single(text)] if text.strip() else []
         
-        # Step 3: Conflict resolution
-        if nlp_sentences:
-            resolved_sentences = self.resolver.resolve(rule_sentences, nlp_sentences)
-        else:
-            resolved_sentences = rule_sentences
+        # Step 2: Sports-aware rule adjustment (POST-PROCESSING)
+        # Rules can only merge/fix NLP output, not override segmentation
+        if self.rule_adjuster:
+            sentences = self.rule_adjuster.adjust(sentences, original_text=text)
         
-        # Step 4: Fallback length splitting
-        final_sentences = self.fallback_splitter.split_long_sentences(resolved_sentences)
+        # Step 3: Fallback length splitting (SAFETY NET)
+        # Only triggers if NLP produces oversized sentences
+        if self.fallback_splitter:
+            sentences = self.fallback_splitter.split_long_sentences(sentences)
         
-        # Step 5: Clean output
-        clean_sentences = self.cleaner.clean(final_sentences)
+        # Step 4: Clean output
+        clean_sentences = self.cleaner.clean(sentences)
         
         return clean_sentences
     
