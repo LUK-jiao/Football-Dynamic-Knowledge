@@ -10,7 +10,7 @@ def main():
     """Run example splitting on sports news."""
     
     # Initialize splitter
-    splitter = SentenceSplitter(use_nlp=True)
+    splitter = SentenceSplitter(enable_sports_rules=True, enable_fallback=True)
     
     # Example 1: Complex sports news with multiple facts
     text1 = (
@@ -32,10 +32,7 @@ def main():
     
     # Example 2: Multiple actions in sequence
     text2 = (
-        "Manchester United secured a crucial victory at Old Trafford, scoring two goals "
-        "in quick succession during the second half, with Marcus Rashford opening the "
-        "scoring in the 67th minute, and Bruno Fernandes adding a second just three "
-        "minutes later."
+        "And yet it could have been so different. In the opening 45 minutes, Ollie Watkins had several decent chances as Villa’s counter-attacks tore through a stretched Arsenal midfield overrun by the movement of Morgan Rogers, the passing ability of Youri Tielemans, and – crucially – the power of Amadou Onana."
     )
     
     print("\n" + "=" * 80)

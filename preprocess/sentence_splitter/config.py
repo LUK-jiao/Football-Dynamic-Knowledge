@@ -79,21 +79,3 @@ NLP_PREFERENCE_RATIO = 0.6
 
 # Maximum facts per sentence (heuristic)
 MAX_FACTS_PER_SENTENCE = 2
-
-MAX_SENTENCE_LENGTH = 100
-
-# Minimum sentence length to be considered valid
-MIN_SENTENCE_LENGTH = 10
-
-# Threshold for considering NLP split over rule split
-# If NLP produces sentences with avg length significantly shorter, may prefer it
-NLP_PREFERENCE_RATIO = 0.6  # NLP avg < ratio * Rule avg
-
-# Minimum tokens required for a valid sentence
-MIN_TOKENS = 3
-
-# Words that should not start a sentence (likely fragments)
-INVALID_START_WORDS = {'and', 'but', 'or', 'with', 'by', 'after'}
-
-# Maximum number of facts per sentence (heuristic based on conjunctions)
-MAX_FACTS_PER_SENTENCE = 2
