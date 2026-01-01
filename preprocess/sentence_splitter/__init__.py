@@ -1,5 +1,6 @@
 """
-Production-grade sentence splitting module for fact extraction.
+Simple and effective sentence splitting module.
+Uses spaCy for accurate sentence boundary detection.
 """
 
 from .splitter import SentenceSplitter
