@@ -22,16 +22,9 @@ def main():
     print("-" * 80)
     
     text1 = """
-    Mikel Arteta's Arsenal side marched on to the EFL Cup semi-finals but did it 
-    the hard way by winning 8-7 on penalties against Crystal Palace, with Kepa 
-    Arrizabalaga saving the 16th spot-kick taken by Maxence Lacroix after 15 
-    successful conversions.
-    Two late goals had resulted in a 1-1 draw after 90 minutes and a lengthy 
-    period of stoppage time.
-    The Gunners will now face rivals Chelsea to fight for a place in the final 
-    at Wembley, with the first leg of their semi-final set for Stamford Bridge 
-    on 14 January.
-    """
+    The Arsenal boss had made eight changes to his starting line-up and admitted: "It's always tough because they don't have the right chemistry when they haven't played together. But their attitude is excellent.
+"I think we had some big individual performances tonight. It's great for Gabriel Jesus tonight, after almost a year out, to start a game and make his 100th [Arsenal] appearance. The commitment within the group is incredible and I'm very happy for the boys."
+Arteta: 'The penalties were unbelievable' against Palace."""
     
     sentences1 = splitter.split(text1)
     print(f"\nInput: {len(text1)} chars")
