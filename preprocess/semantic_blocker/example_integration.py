@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from preprocess.sentence_splitter import SentenceSplitter
 from preprocess.semantic_blocker import semantic_block
+from preprocess.semantic_blocker.event_chunker import event_based_chunk
 
 
 def main():
@@ -62,7 +63,8 @@ Arteta: 'The penalties were unbelievable' against Palace.
     print("STEP 2: Semantic Blocking")
     print("=" * 80)
     
-    blocks = semantic_block(sentences, similarity_threshold=0.5, max_block_length=350)
+    # blocks = semantic_block(sentences, similarity_threshold=0.5, max_block_length=350)
+    blocks = event_based_chunk(sentences, max_block_length=400)
     print(f"\n✓ Grouped into {len(blocks)} semantic blocks:\n")
     for i, block in enumerate(blocks, 1):
         print(f"\n[Block {i}]")

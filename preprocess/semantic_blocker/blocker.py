@@ -73,8 +73,9 @@ class SemanticBlocker:
     
     def __init__(
         self,
-        model_name: str = 'all-MiniLM-L6-v2',
-        similarity_threshold: float = 0.6,
+        # model_name: str = 'all-MiniLM-L6-v2',
+        model_name: str = 'all-mpnet-base-v2',
+        similarity_threshold: float = 0.5,
         max_block_length: int = 400,
         use_subject_matching: bool = True
     ):
