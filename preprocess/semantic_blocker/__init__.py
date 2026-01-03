@@ -1,8 +1,9 @@
 """
-Semantic blocking module for grouping sentences into coherent semantic blocks.
+Semantic blocking module - LLM-based event aggregation.
+Groups sentences into coherent semantic blocks using LLM intelligence.
 Each block represents a complete event or fact suitable for downstream extraction.
 """
 
-from .blocker import semantic_block, SemanticBlocker
+from .llm_aggregator import llm_semantic_chunk, LLMEventAggregator
 
-__all__ = ['semantic_block', 'SemanticBlocker']
+__all__ = ['llm_semantic_chunk', 'LLMEventAggregator']
