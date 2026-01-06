@@ -13,8 +13,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sentence_splitter import SentenceSplitter
-from semantic_blocker.semantic_chunker_v2 import SemanticChunker, ChunkerConfig, GranularityMode
-from semantic_blocker.ollama_backend_v2 import OllamaBackendV2
+from semantic_blocker import SemanticChunker, ChunkerConfig, GranularityMode, OllamaBackend
 import logging
 
 # Setup logging
@@ -66,7 +65,7 @@ def test_full_pipeline():
     # Step 2: Semantic chunking with v2 system
     print("\n[Step 2] Semantic Chunking with Ollama v2 (Continuous Scoring)...")
     
-    backend = OllamaBackendV2(model="llama3:latest", timeout=30, temperature=0.2)
+    backend = OllamaBackend(model="llama3:latest", timeout=30, temperature=0.2)
     
     config = ChunkerConfig(
         granularity=GranularityMode.MEDIUM,
@@ -196,7 +195,7 @@ def test_edge_cases():
     print("="*80)
     
     splitter = SentenceSplitter()
-    backend = OllamaBackendV2(model="llama3:latest", temperature=0.2)
+    backend = OllamaBackend(model="llama3:latest", temperature=0.2)
     config = ChunkerConfig(granularity=GranularityMode.MEDIUM)
     chunker = SemanticChunker(llm=backend, config=config)
     

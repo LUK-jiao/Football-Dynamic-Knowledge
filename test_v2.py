@@ -5,8 +5,7 @@ Test Semantic Chunker v2 on Arsenal Match Report
 import sys
 sys.path.insert(0, 'preprocess')
 
-from semantic_blocker.semantic_chunker_v2 import SemanticChunker, ChunkerConfig, GranularityMode
-from semantic_blocker.ollama_backend_v2 import OllamaBackendV2
+from semantic_blocker import SemanticChunker, ChunkerConfig, GranularityMode, OllamaBackend
 from sentence_splitter import SentenceSplitter
 
 # Test text
@@ -34,7 +33,7 @@ def test_granularity_mode(mode: GranularityMode):
     print(f"Input: {len(sentences)} sentences\n")
     
     # Initialize chunker
-    backend = OllamaBackendV2(model="llama3:latest", temperature=0.2)
+    backend = OllamaBackend(model="llama3:latest", temperature=0.2)
     config = ChunkerConfig(
         granularity=mode,
         context_window=2,
