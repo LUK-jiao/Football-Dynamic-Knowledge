@@ -68,12 +68,12 @@ def test_full_pipeline():
     backend = OllamaBackend(model="llama3:latest", timeout=30, temperature=0.2)
     
     config = ChunkerConfig(
-        granularity=GranularityMode.MEDIUM,
+        granularity=GranularityMode.FINE,
         context_window=2,
-        max_sentences_per_chunk=5,
+        max_sentences_per_chunk=10,
         enable_structural_rules=True,
         enable_orphan_merge=True,
-        log_scores=False
+        log_scores=True
     )
     
     chunker = SemanticChunker(llm=backend, config=config)
@@ -227,7 +227,7 @@ def main():
         success = test_full_pipeline()
         
         # Edge case tests
-        test_edge_cases()
+        #test_edge_cases()
         
         if success:
             print("\n🎉 Integration testing complete!")

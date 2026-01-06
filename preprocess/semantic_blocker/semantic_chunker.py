@@ -134,7 +134,7 @@ class LLMBackend:
 # Structural Rule Detection
 # ============================================================================
 
-class StructuralRules:
+class StructuralRules: #通过正则匹配针对
     """Rule-based detection of forced semantic boundaries."""
     
     # Patterns that force a new chunk
@@ -226,7 +226,7 @@ class SemanticChunker:
         Split sentences into semantic chunks.
         
         Args:
-            sentences: Pre-split sentences (from rule-based splitter)
+            sentences: Pre-split sentences (from spaCy-based splitter)
             
         Returns:
             List of Chunk objects with metadata
@@ -299,7 +299,7 @@ class SemanticChunker:
             
             # Log if enabled
             if self.config.log_scores:
-                self.logger.debug(
+                self.logger.info(
                     f"Sentence {i}: score={scoring_result.score:.2f} "
                     f"(threshold={self.config.break_threshold:.2f})"
                 )
