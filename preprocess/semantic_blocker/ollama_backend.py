@@ -1,10 +1,10 @@
 """
-Ollama Backend for Semantic Chunker
+Ollama Backend for Semantic Chunker (v2 - Continuous Scoring)
 
 Implements LLMBackend interface using local Ollama server.
 
 Features:
-- Strict prompt engineering for binary output
+- Continuous semantic break strength scoring (0.0 - 1.0)
 - Timeout handling
 - Connection error recovery
 - Minimal context to reduce latency
@@ -18,52 +18,45 @@ from .semantic_chunker import LLMBackend
 
 class OllamaBackend(LLMBackend):
     """
-    Ollama-based LLM backend for semantic boundary detection.
+    Ollama-based LLM backend for semantic boundary strength scoring.
     
-    Uses localhost Ollama server for inference.
+    Returns a continuous score (0.0-1.0) instead of binary decision.
     """
     
-    # Strict system prompt
-    SYSTEM_PROMPT = """You are a semantic boundary classifier for news text.
+    # Semantic break strength scoring prompt
+    SYSTEM_PROMPT = """You are evaluating whether the CURRENT sentence starts a new semantic unit relative to the PREVIOUS context.
 
-Your ONLY task: decide if sentence B continues the SAME narrow information unit as sentence A.
+Semantic units correspond to coherent events or sub-events (e.g. match outcome, goal sequence, penalty shoot-out, manager comments).
 
-Rules for SAME_UNIT:
-- B directly continues or elaborates A's specific point
-- B uses pronouns/references clearly pointing back to A
-- Same time frame, same actor, same sub-event
+Return a single number between 0.0 and 1.0:
 
-Rules for NEW_UNIT (be sensitive to these):
-- Time shift ("After the match", "Earlier", "Previously")
-- Speaker change (narrator → quote, one person → another)
-- Topic shift (match action → statistics, goal → other goal)
-- Different event phase (regular time → penalties → post-match)
-- New paragraph structure (usually signals topic change)
-- Statistical info after narrative
-- Quotes after description
+0.0 = same semantic unit (strong continuation)
+0.3 = weak continuation / elaboration
+0.5 = sub-event shift (same topic, different aspect)
+0.7 = clear semantic boundary
+1.0 = completely new topic / event
 
-Default to NEW_UNIT when in doubt.
+Guidelines:
+- Same event/action = 0.0-0.2
+- Adding detail to previous = 0.2-0.4
+- Shift within same topic = 0.4-0.6
+- New sub-event = 0.6-0.8
+- New topic/team/time = 0.8-1.0
 
-CRITICAL: Output ONLY ONE TOKEN.
-- Output "SAME_UNIT" or "NEW_UNIT"
-- NO explanation
-- NO punctuation
-- NO additional text"""
+Output ONLY the number (e.g. 0.3 or 0.7). No explanation."""
 
-    USER_PROMPT_TEMPLATE = """Sentence A:
-{previous}
+    USER_PROMPT_TEMPLATE = """PREVIOUS context: {previous}
 
-Sentence B:
-{current}
+CURRENT sentence: {current}
 
-Decision:"""
+Semantic break strength (0.0-1.0):"""
     
     def __init__(
         self,
         model: str = "llama3:latest",
         base_url: str = "http://localhost:11434",
         timeout: int = 30,
-        temperature: float = 0.0
+        temperature: float = 0.1  # Low for consistency
     ):
         """
         Initialize Ollama backend.
@@ -113,19 +106,28 @@ Decision:"""
         self, 
         current_sentence: str, 
         previous_sentences: List[str]
-    ) -> Tuple[str, bool]:
+    ) -> Tuple[float, bool]:
         """
-        Ask Ollama to decide semantic boundary.
+        Ask Ollama to score semantic break strength.
         
         Args:
             current_sentence: Current sentence
-            previous_sentences: 1-N previous sentences
+            previous_sentences: 1-N previous sentences (dynamic context)
             
         Returns:
-            (raw_output, success)
+            (score: float [0.0-1.0], success: bool)
+            - score=0.0: same semantic unit
+            - score=1.0: completely new topic
+            - success=False if parsing failed
         """
-        # Use only the most recent sentence for context
-        previous_text = previous_sentences[-1] if previous_sentences else ""
+        # Use ALL previous sentences as context (dynamic window)
+        if not previous_sentences:
+            previous_text = "[No previous context]"
+        elif len(previous_sentences) == 1:
+            previous_text = previous_sentences[0]
+        else:
+            # Multiple sentences: join as single context
+            previous_text = " ".join(previous_sentences)
         
         # Build prompt
         user_prompt = self.USER_PROMPT_TEMPLATE.format(
@@ -141,8 +143,8 @@ Decision:"""
             "options": {
                 "temperature": self.temperature,
                 "top_p": 0.9,
-                "num_predict": 10,  # Limit output tokens
-                "stop": ["\n", ".", "!"]  # Stop at first token
+                "num_predict": 10,  # Need a bit more for floating point
+                "stop": ["\n", " ", "explanation", "Explanation"]
             }
         }
         
@@ -157,23 +159,32 @@ Decision:"""
             result = resp.json()
             raw_output = result.get("response", "").strip()
             
-            return (raw_output, True)
+            # Parse float score from output
+            try:
+                score = float(raw_output)
+                # Clamp to [0.0, 1.0]
+                score = max(0.0, min(1.0, score))
+                return (score, True)
+            except ValueError:
+                # Failed to parse - return error
+                self.logger.warning(f"Failed to parse score from: '{raw_output}'")
+                return (0.5, False)  # Default to neutral score
             
         except requests.exceptions.Timeout:
             self.logger.error(f"Ollama request timeout after {self.timeout}s")
-            return ("", False)
+            return (0.5, False)
             
         except requests.exceptions.ConnectionError:
             self.logger.error("Cannot connect to Ollama server")
-            return ("", False)
+            return (0.5, False)
             
         except requests.exceptions.HTTPError as e:
             self.logger.error(f"Ollama HTTP error: {e}")
-            return ("", False)
+            return (0.5, False)
             
         except Exception as e:
             self.logger.error(f"Unexpected error calling Ollama: {e}")
-            return ("", False)
+            return (0.5, False)
     
     def test_connection(self) -> bool:
         """

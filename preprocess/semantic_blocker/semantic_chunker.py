@@ -61,15 +61,25 @@ class ChunkDecision:
 
 @dataclass
 class ChunkerConfig:
-    """Configuration for semantic chunker."""
-    window_size: int = 1  # How many previous sentences to consider
-    force_new_on_failure: bool = True  # Fallback strategy
+    """
+    Configuration for semantic chunker.
+    
+    Args:
+        window_size: 
+            - Positive int: Fixed window (use last N sentences)
+            - -1: Dynamic window (use all accumulated sentences in current chunk)
+        force_new_on_failure: Fallback strategy when LLM fails
+        log_failures: Whether to log LLM failures
+        max_context_length: Max chars in context for LLM
+    """
+    window_size: int = 1  # 1=fixed window, -1=dynamic window
+    force_new_on_failure: bool = True
     log_failures: bool = True
-    max_context_length: int = 500  # Max chars in context for LLM
+    max_context_length: int = 500
     
     def __post_init__(self):
-        if self.window_size < 1:
-            raise ValueError("window_size must be at least 1")
+        if self.window_size < 1 and self.window_size != -1:
+            raise ValueError("window_size must be positive or -1 (dynamic)")
         if self.window_size > 5:
             logging.warning(f"Large window_size ({self.window_size}) may impact performance")
 
@@ -196,15 +206,26 @@ class SemanticChunker:
     
     def _get_previous_context(self, current_chunk: List[str]) -> List[str]:
         """
-        Extract previous N sentences for context window.
+        Extract previous sentences for context window.
+        
+        Dynamic window strategy:
+        - If window_size=-1: Use all sentences in current chunk (累积窗口)
+          BUT limit to last 3 sentences to avoid context overflow
+        - Otherwise: Use last N sentences (固定窗口)
         
         Args:
             current_chunk: The chunk being built
             
         Returns:
-            Last N sentences (based on config.window_size)
+            Previous sentences for comparison
         """
         window_size = self.config.window_size
+        
+        # Dynamic window: use accumulated context (max 3 sentences)
+        if window_size == -1:
+            return current_chunk[-3:]  # Limit to prevent overwhelming context
+        
+        # Fixed window: use last N sentences
         return current_chunk[-window_size:]
     
     def _make_decision(

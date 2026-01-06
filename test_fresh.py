@@ -1,12 +1,9 @@
-"""Debug test case 1"""
 import sys
 sys.path.insert(0, 'preprocess')
-
 from sentence_splitter import SentenceSplitter
 from semantic_blocker import SemanticChunker, ChunkerConfig, OllamaBackend
 
-text = """
-Mikel Arteta's Arsenal side marched on to the EFL Cup semi-finals but did it the hard way by winning 8-7 on penalties against Crystal Palace, with Kepa Arrizabalaga saving the 16th spot-kick taken by Maxence Lacroix after 15 successful conversions. Two late goals had resulted in a 1-1 draw after 90 minutes and a lengthy period of stoppage time. The Gunners will now face rivals Chelsea to fight for a place in the final at Wembley, with the first leg of their semi-final set for Stamford Bridge on 14 January.
+text = """Mikel Arteta's Arsenal side marched on to the EFL Cup semi-finals but did it the hard way by winning 8-7 on penalties against Crystal Palace, with Kepa Arrizabalaga saving the 16th spot-kick taken by Maxence Lacroix after 15 successful conversions. Two late goals had resulted in a 1-1 draw after 90 minutes and a lengthy period of stoppage time. The Gunners will now face rivals Chelsea to fight for a place in the final at Wembley, with the first leg of their semi-final set for Stamford Bridge on 14 January.
 
 After bossing much of the quarter-final against Palace and creating the majority of big chances, Arteta's men finally found their breakthrough, which came from a corner in the 80th minute. A well-placed delivery into the box from Bukayo Saka found the head of Riccardo Calafiori and eventually went into the net off Palace centre-back Lacroix. The unfortunate own goal did not dampen Palace's spirits as they went in search of an equaliser. When it finally did arrive, they had club captain Marc Guehi to thank. The England international was the first to react to a knock-on from Jefferson Lerma in the fifth minute of stoppage time.
 
@@ -20,29 +17,17 @@ Arteta told Sky Sports after the game: "I'm very happy to be in the semi-finals.
 splitter = SentenceSplitter()
 sentences = splitter.split(text)
 
-print(f"Total sentences: {len(sentences)}\n")
-
-backend = OllamaBackend(model="llama3:latest")
-config = ChunkerConfig(window_size=1, log_failures=False)
-chunker = SemanticChunker(backend, config)
-
+backend = OllamaBackend(model="llama3:latest", temperature=0.3)
+# Try fixed window with 3 sentences
+chunker = SemanticChunker(backend, ChunkerConfig(window_size=3))
 chunks = chunker.chunk(sentences)
 
-print(f"Chunks created: {len(chunks)}\n")
-
-# Print each decision
-print("Decision breakdown:")
-print("-" * 80)
-for i in range(1, len(sentences)):
-    print(f"\nDecision {i}:")
-    print(f"  Previous: {sentences[i-1][:80]}...")
-    print(f"  Current:  {sentences[i][:80]}...")
-    # We can't see individual decisions, but we can infer from chunks
-
+print(f"Total: {len(sentences)} sentences → {len(chunks)} chunks\n")
 stats = chunker.get_stats()
-print("\n" + "="*80)
-print("Statistics:")
-print(f"  Total decisions: {stats['total_decisions']}")
-print(f"  SAME_UNIT: {stats['same_unit_count']}")
-print(f"  NEW_UNIT: {stats['new_unit_count']}")
-print(f"  Fallback rate: {stats['fallback_rate']:.2%}")
+print(f"Decisions: {stats['same_unit_count']} SAME, {stats['new_unit_count']} NEW")
+print(f"\nDetailed chunks:")
+for i, chunk in enumerate(chunks, 1):
+    print(f"\n[Chunk {i}] {len(chunk)} sentences:")
+    for j, sent in enumerate(chunk, 1):
+        preview = sent[:80] + "..." if len(sent) > 80 else sent
+        print(f"  {j}. {preview}")

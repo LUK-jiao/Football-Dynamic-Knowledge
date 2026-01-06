@@ -1,9 +1,9 @@
 """
-Integration Test: Sentence Splitting + Semantic Chunking
+Integration Test: Sentence Splitting + Semantic Chunking (v2)
 
 This test demonstrates the complete pipeline:
 1. Raw text → Sentence Splitter → Sentences
-2. Sentences → Semantic Chunker → Semantic Chunks
+2. Sentences → Semantic Chunker v2 → Semantic Chunks (with continuous scoring)
 
 Uses real Ollama LLM for end-to-end validation.
 """
@@ -13,7 +13,8 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sentence_splitter import SentenceSplitter
-from semantic_blocker import semantic_chunk, OllamaBackend, ChunkerConfig
+from semantic_blocker.semantic_chunker_v2 import SemanticChunker, ChunkerConfig, GranularityMode
+from semantic_blocker.ollama_backend_v2 import OllamaBackendV2
 import logging
 
 # Setup logging
@@ -62,30 +63,29 @@ def test_full_pipeline():
     for i, sent in enumerate(sentences, 1):
         print(f"    {i}. {sent}")
     
-    # Step 2: Semantic chunking
-    print("\n[Step 2] Semantic Chunking with Ollama...")
+    # Step 2: Semantic chunking with v2 system
+    print("\n[Step 2] Semantic Chunking with Ollama v2 (Continuous Scoring)...")
     
-    backend = OllamaBackend(model="llama3:latest", timeout=30)
-    
-    # Test connection first
-    if not backend.test_connection():
-        print("  ✗ Cannot connect to Ollama server")
-        print("  Please start Ollama: ollama serve")
-        return False
+    backend = OllamaBackendV2(model="llama3:latest", timeout=30, temperature=0.2)
     
     config = ChunkerConfig(
-        window_size=1,
-        force_new_on_failure=True,
-        log_failures=False  # Reduce noise in test output
+        granularity=GranularityMode.MEDIUM,
+        context_window=2,
+        max_sentences_per_chunk=5,
+        enable_structural_rules=True,
+        enable_orphan_merge=True,
+        log_scores=False
     )
     
-    chunks = semantic_chunk(sentences, backend, window_size=1)
+    chunker = SemanticChunker(llm=backend, config=config)
+    chunks = chunker.chunk(sentences)
     
     print(f"  ✓ Created {len(chunks)} semantic chunks:")
-    for i, chunk in enumerate(chunks, 1):
-        print(f"\n    Chunk {i} ({len(chunk)} sentences):")
-        for sent in chunk:
-            print(f"      • {sent}")
+    for chunk in chunks:
+        print(f"\n    Chunk {chunk.chunk_id} ({len(chunk)} sentences) - Type: {chunk.chunk_type}")
+        for sent in chunk.sentences:
+            preview = sent[:80] + "..." if len(sent) > 80 else sent
+            print(f"      • {preview}")
     
     # ========================================================================
     # Test Case 2: Transfer News & Injury Update
@@ -113,11 +113,12 @@ def test_full_pipeline():
     print(f"  ✓ Split into {len(sentences_2)} sentences")
     
     print("\n[Step 2] Semantic Chunking...")
-    chunks_2 = semantic_chunk(sentences_2, backend, window_size=1)
+    chunks_2 = chunker.chunk(sentences_2)
     print(f"  ✓ Created {len(chunks_2)} semantic chunks:")
     
-    for i, chunk in enumerate(chunks_2, 1):
-        print(f"\n    Chunk {i}: {' '.join(chunk[:50])}...")
+    for chunk in chunks_2:
+        preview = ' '.join(chunk.sentences)[:100] + "..."
+        print(f"\n    Chunk {chunk.chunk_id} ({chunk.chunk_type}): {preview}")
     
     # ========================================================================
     # Test Case 3: Quote Aggregation
@@ -145,12 +146,12 @@ def test_full_pipeline():
         print(f"    {i}. {sent}")
     
     print("\n[Step 2] Semantic Chunking...")
-    chunks_3 = semantic_chunk(sentences_3, backend, window_size=1)
+    chunks_3 = chunker.chunk(sentences_3)
     print(f"  ✓ Created {len(chunks_3)} semantic chunks:")
     
-    for i, chunk in enumerate(chunks_3, 1):
-        print(f"\n    Chunk {i}:")
-        for sent in chunk:
+    for chunk in chunks_3:
+        print(f"\n    Chunk {chunk.chunk_id} ({chunk.chunk_type}):")
+        for sent in chunk.sentences:
             print(f"      • {sent}")
     
     # ========================================================================
@@ -195,18 +196,20 @@ def test_edge_cases():
     print("="*80)
     
     splitter = SentenceSplitter()
-    backend = OllamaBackend(model="llama3:latest")
+    backend = OllamaBackendV2(model="llama3:latest", temperature=0.2)
+    config = ChunkerConfig(granularity=GranularityMode.MEDIUM)
+    chunker = SemanticChunker(llm=backend, config=config)
     
     # Test 1: Empty text
     print("\n[Edge Case 1] Empty text")
     sentences = splitter.split("")
-    chunks = semantic_chunk(sentences, backend) if sentences else []
+    chunks = chunker.chunk(sentences) if sentences else []
     print(f"  ✓ Empty text: {len(sentences)} sentences, {len(chunks)} chunks")
     
     # Test 2: Single sentence
     print("\n[Edge Case 2] Single sentence")
     sentences = splitter.split("This is a single sentence.")
-    chunks = semantic_chunk(sentences, backend)
+    chunks = chunker.chunk(sentences)
     print(f"  ✓ Single sentence: {len(sentences)} sentences, {len(chunks)} chunks")
     assert len(chunks) == 1
     
