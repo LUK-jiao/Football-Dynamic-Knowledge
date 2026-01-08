@@ -28,7 +28,7 @@ class EntityType(str, Enum):
     OTHER = "Other"
 
 
-class SourceType(str, Enum):
+class SourceType(str, Enum): #todo 这里来源类型枚举怎么用的
     """来源类型枚举"""
     MEDIA = "Media"
     OFFICIAL = "Official"
@@ -66,8 +66,8 @@ class FootballAnchorExtractor:
         """
         self.llm_backend = llm_backend
         
-        # 知名足球俱乐部列表
-        self.known_clubs = {
+        # 知名足球俱乐部列表 #todo 还要加上球员和教练的名单
+        self.known_clubs = { #todo 拓展一下俱乐部，起码全部英超俱乐部要有，并且还需要转换一下昵称，比如曼城->City，曼联->Utd，阿森纳->Gunners
             "Manchester United", "Bayern Munich", "Real Madrid", "Barcelona", 
             "Liverpool", "Chelsea", "Arsenal", "Manchester City", "Tottenham",
             "Paris Saint-Germain", "PSG", "Juventus", "AC Milan", "Inter Milan",
@@ -231,7 +231,7 @@ class FootballAnchorExtractor:
         """
         temporal_anchors = []
         
-        # 1. 提取明确日期（YYYY-MM-DD, DD/MM/YYYY, Month DD, YYYY等）
+        # 1. 提取明确日期（YYYY-MM-DD, DD/MM/YYYY, Month DD, YYYY等）todo 需要处理monday等
         date_patterns = [
             r'\b(\d{4})-(\d{2})-(\d{2})\b',  # 2025-09-01
             r'\b(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b',  # 01/09/2025
@@ -298,7 +298,7 @@ class FootballAnchorExtractor:
         
         return None
     
-    def _parse_relative_dates(self, text: str, publish_date: str) -> List[Dict[str, str]]:
+    def  _parse_relative_dates(self, text: str, publish_date: str) -> List[Dict[str, str]]:
         """
         解析相对日期（today, tomorrow, next week等）
         

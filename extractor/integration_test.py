@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import json
 from typing import List, Dict, Any
+from datetime import datetime
 
 from preprocess.sentence_splitter.splitter import SentenceSplitter
 from preprocess.semantic_blocker import SemanticChunker, ChunkerConfig, GranularityMode, OllamaBackend
@@ -117,7 +118,14 @@ def test_pipeline(raw_text: str, source: str, publish_date: str, test_name: str)
     llm_backend = OllamaBackend()
     chunker = SemanticChunker(
         llm=llm_backend,
-        config=ChunkerConfig(granularity=GranularityMode.MEDIUM)
+        config = ChunkerConfig(
+        granularity=GranularityMode.FINE,
+        context_window=2,
+        max_sentences_per_chunk=10,
+        enable_structural_rules=True,
+        enable_orphan_merge=True,
+        log_scores=True
+    )
     )
     
     chunks = chunker.chunk(sentences)
@@ -257,7 +265,9 @@ def test_pipeline(raw_text: str, source: str, publish_date: str, test_name: str)
     output_dir = os.path.join(os.path.dirname(__file__), "output")
     os.makedirs(output_dir, exist_ok=True)
     
-    output_file = f"extractor_output_{test_name.replace(' ', '_').lower()}.json"
+    # 添加时间戳避免覆盖旧文件
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_file = f"extractor_output_{test_name.replace(' ', '_').lower()}_{timestamp}.json"
     output_path = os.path.join(output_dir, output_file)
     
     with open(output_path, 'w', encoding='utf-8') as f:
@@ -292,30 +302,41 @@ def main():
     "I think we had some big individual performances tonight. It's great for Gabriel Jesus tonight, after almost a year out, to start a game and make his 100th [Arsenal] appearance. The commitment within the group is incredible and I'm very happy for the boys."
     """
     
-    test_pipeline(
-        raw_text=test_1_text,
-        source="Sky Sports",
-        publish_date="2025-01-15",
-        test_name="Arsenal EFL Cup Match"
-    )
+    # test_pipeline(
+    #     raw_text=test_1_text,
+    #     source="Sky Sports",
+    #     publish_date="2025-01-15",
+    #     test_name="Arsenal EFL Cup Match"
+    # )
     
     # ========================================================================
     # 测试 2: 转会新闻
     # ========================================================================
     test_2_text = """
-    Manchester United have completed the signing of Matthijs de Ligt from Bayern Munich for a fee of £42.7m.
-    The 25-year-old Netherlands international has agreed a five-year contract at Old Trafford.
-    De Ligt made 30 appearances for Bayern last season after joining from Juventus in 2022.
-    Manager Erik ten Hag welcomed the defender, saying: "Matthijs is a player I know very well from our time together at Ajax. 
-    He has proven himself at the highest level and will be a great addition to our squad."
-    The transfer was confirmed by the club's official website on July 30, 2024.
+    West Ham United is delighted to announce the signing of Argentina international forward Taty Castellanos.
+
+The 27-year-old joins the Hammers from Italian club Lazio on a four-and-a-half year contract with the option for a further year.
+
+An aggressive, deep-lying forward capable of scoring and creating goals, linking play and working hard for his team, Castellanos has enjoyed a superb career in the MLS, La Liga and Serie A and will now bring his all-round qualities to the Premier League.
+
+Born in Mendoza and capped twice by his country, Castellanos won the MLS Cup and Golden Boot with New York City FC in 2021 before netting four goals in a single game for Girona against Real Madrid in La Liga in 2023. He then scored 14 times last season as Lazio finished seventh in Serie A and reached the UEFA Europa League quarter-finals.
+
+Identified as a key target by Head Coach Nuno Espírito Santo, the Hammers’ new No11 - who has signed in time to be available for Tuesday evening’s Premier League match against Nottingham Forest at London Stadium - is now looking forward to pulling on a West Ham shirt and showing the Claret and Blue Army what he can do.
+
+“I'm really happy because it's a very important challenge for me personally and I've come to contribute, to try to help the team as much as I can,” said Castellanos.
+
+“Every match is a battle, and I'm here to contribute that, to try to bring that energy, that fighting spirit I have inside, so that every match is as important and as tough as possible.
+
+“I hope to give my all to the fans. I've always defended the jersey of every team with the utmost responsibility, and I want to tell them that I'm going to give everything, to defend this jersey, and obviously, to achieve our goals day after day. That's the most important thing.”
+
+Everyone at West Ham United would like to welcome Taty and his family to East London, and wishes him every success for his career in Claret and Blue.
     """
     
     test_pipeline(
         raw_text=test_2_text,
-        source="Manchester United Official",
-        publish_date="2024-07-30",
-        test_name="De Ligt Transfer"
+        source="West Ham United Official",
+        publish_date="2026-01-05",
+        test_name="Taty Castellanos Transfer"
     )
     
     # ========================================================================
@@ -329,22 +350,22 @@ def main():
     This setback comes at a crucial time as Liverpool prepare to face Manchester City on Saturday.
     """
     
-    test_pipeline(
-        raw_text=test_3_text,
-        source="Liverpool FC Official",
-        publish_date="2025-11-20",
-        test_name="Salah Injury Report"
-    )
+    # test_pipeline(
+    #     raw_text=test_3_text,
+    #     source="Liverpool FC Official",
+    #     publish_date="2025-11-20",
+    #     test_name="Salah Injury Report"
+    # )
     
     print_section("✅ 所有测试完成", level=1)
-    print("\n💡 关键验证点:")
-    print("  1. ✅ semantic_blocker → extractor 数据格式对接")
-    print("  2. ✅ 四类锚点正确抽取")
-    print("  3. ✅ 输出格式严格符合规范")
-    print("  4. ✅ block_id 保持不变")
-    print("  5. ✅ 原始字段完整保留")
-    print("  6. ✅ JSON 可解析性")
-    print("\n🎯 流水线已就绪，可供下游模块使用（Knowledge Graph / Verifier / RAG）\n")
+    # print("\n💡 关键验证点:")
+    # print("  1. ✅ semantic_blocker → extractor 数据格式对接")
+    # print("  2. ✅ 四类锚点正确抽取")
+    # print("  3. ✅ 输出格式严格符合规范")
+    # print("  4. ✅ block_id 保持不变")
+    # print("  5. ✅ 原始字段完整保留")
+    # print("  6. ✅ JSON 可解析性")
+    # print("\n🎯 流水线已就绪，可供下游模块使用（Knowledge Graph / Verifier / RAG）\n")
 
 
 if __name__ == "__main__":
