@@ -98,6 +98,24 @@ class Chunk:
     
     def __len__(self):
         return len(self.sentences)
+    
+    def to_extractor_input(self, source: str = "", publish_date: str = "") -> dict:
+        """
+        转换为 extractor 模块所需的输入格式
+        
+        Args:
+            source: 文档来源（如 "BBC", "Official"）
+            publish_date: 发布日期（YYYY-MM-DD）
+            
+        Returns:
+            标准化的 extractor 输入字典，包含 block_id, text, source, publish_date
+        """
+        return {
+            "block_id": f"block_{self.chunk_id:03d}",
+            "text": " ".join(self.sentences),  # 合并句子为单个文本块
+            "source": source,
+            "publish_date": publish_date
+        }
 
 
 # ============================================================================

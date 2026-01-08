@@ -52,3 +52,10 @@ htmlcov/
 
 # Docker
 docker-compose.override.yaml
+
+# Extractor outputs (可选：如果不想提交输出文件，取消下面的注释)
+extractor/output/*.json
+
+# Debug files (这些是开发时的测试文件，已整理到 debug/ 目录)
+debug/
+
