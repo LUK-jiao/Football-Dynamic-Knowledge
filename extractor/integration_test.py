@@ -267,7 +267,7 @@ def test_pipeline(raw_text: str, source: str, publish_date: str, test_name: str)
     
     # 添加时间戳避免覆盖旧文件
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_file = f"extractor_output_{test_name.replace(' ', '_').lower()}_{timestamp}.json"
+    output_file = f"{test_name.replace(' ', '_').lower()}_{timestamp}.json"
     output_path = os.path.join(output_dir, output_file)
     
     with open(output_path, 'w', encoding='utf-8') as f:
