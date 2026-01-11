@@ -94,13 +94,23 @@ def test_full_pipeline():
     print("-"*80)
     
     text_2 = """
-    Manchester United have completed the signing of striker Marcus Thuram from Inter Milan.
-    The transfer fee is reported to be €85 million. Thuram signed a five-year contract with 
-    the Red Devils. He will wear the number 9 shirt.
-    
-    In other news, Liverpool midfielder Thiago Alcântara has been ruled out for six weeks 
-    with a hamstring injury. The Spaniard suffered the injury during training on Tuesday.
-    Manager Jürgen Klopp described it as a "big blow" for the team.
+    West Ham United is delighted to announce the signing of Argentina international forward Taty Castellanos.
+
+The 27-year-old joins the Hammers from Italian club Lazio on a four-and-a-half year contract with the option for a further year.
+
+An aggressive, deep-lying forward capable of scoring and creating goals, linking play and working hard for his team, Castellanos has enjoyed a superb career in the MLS, La Liga and Serie A and will now bring his all-round qualities to the Premier League.
+
+Born in Mendoza and capped twice by his country, Castellanos won the MLS Cup and Golden Boot with New York City FC in 2021 before netting four goals in a single game for Girona against Real Madrid in La Liga in 2023. He then scored 14 times last season as Lazio finished seventh in Serie A and reached the UEFA Europa League quarter-finals.
+
+Identified as a key target by Head Coach Nuno Espírito Santo, the Hammers’ new No11 - who has signed in time to be available for Tuesday evening’s Premier League match against Nottingham Forest at London Stadium - is now looking forward to pulling on a West Ham shirt and showing the Claret and Blue Army what he can do.
+
+“I'm really happy because it's a very important challenge for me personally and I've come to contribute, to try to help the team as much as I can,” said Castellanos.
+
+“Every match is a battle, and I'm here to contribute that, to try to bring that energy, that fighting spirit I have inside, so that every match is as important and as tough as possible.
+
+“I hope to give my all to the fans. I've always defended the jersey of every team with the utmost responsibility, and I want to tell them that I'm going to give everything, to defend this jersey, and obviously, to achieve our goals day after day. That's the most important thing.”
+
+Everyone at West Ham United would like to welcome Taty and his family to East London, and wishes him every success for his career in Claret and Blue.
     """
     
     print("\nOriginal text:")

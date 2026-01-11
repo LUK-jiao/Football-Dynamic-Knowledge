@@ -113,7 +113,8 @@ print(result)
     "constraints": [
       {"type": "TRANSFER_STATUS", "subject": "De Ligt", "expected_state": "transfer_possible"}
     ]
-  }
+  },
+  "fact_type": {"event":} 
 }
 ```
 
