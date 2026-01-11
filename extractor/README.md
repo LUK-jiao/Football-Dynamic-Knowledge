@@ -114,9 +114,94 @@ print(result)
       {"type": "TRANSFER_STATUS", "subject": "De Ligt", "expected_state": "transfer_possible"}
     ]
   },
-  "fact_type": {"event":} 
+  "fact_type": "EVENT",
+  "need_resolver": false
 }
 ```
+
+#### 字段说明
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `block_id` | string | 语义块ID（保持不变） |
+| `text` | string | 原始文本（保持不变） |
+| `source` | string | 信息来源（保持不变） |
+| `publish_date` | string | 发布日期（保持不变） |
+| `anchors` | object | 四类锚点（参与者、时间、来源、约束） |
+| `fact_type` | string | 事实类型："EVENT" 或 "STATE" ⭐ 新增 |
+| `need_resolver` | boolean | 是否需要 resolver 推理有效期 ⭐ 新增 |
+
+### Fact Type 判定
+
+Extractor 现在可以自动判定每个语义块的事实类型：
+
+#### EVENT（历史事件）
+- **定义**：描述已经发生的事实，一旦成立永远成立，不依赖"当前时间 now"
+- **特征**：
+  - 明确时间点（on 1 September 2025, in 2021）
+  - 过去时/完成时动词（signed, won, scored, agreed）
+  - 比赛结果、转会完成、历史表现
+  
+**示例**：
+```python
+# EVENT 示例 1：转会完成
+text = "De Ligt has agreed to join Manchester United on 1 September 2025."
+# → fact_type = "EVENT", need_resolver = false
+
+# EVENT 示例 2：历史进球
+text = "Castellanos scored four goals against Real Madrid in 2023."
+# → fact_type = "EVENT", need_resolver = false
+
+# EVENT 示例 3：比赛结果
+text = "Arsenal won 3-2 against Chelsea."
+# → fact_type = "EVENT", need_resolver = false
+```
+
+#### STATE（状态事实）
+- **定义**：描述在某一时间区间内成立的事实，随时间变化，必须依赖当前时间判断真假
+- **特征**：
+  - 现在时状态描述（is, remains, serves as）
+  - 身份、职位、合同状态、伤病状态
+  - 文本中隐含 "until something happens"
+
+**示例**：
+```python
+# STATE 示例 1：教练身份
+text = "Amorim is the head coach of Manchester United."
+# → fact_type = "STATE", need_resolver = true（需要推理任期）
+
+# STATE 示例 2：合同状态（有到期日）
+text = "He signed a contract until 2028."
+# → fact_type = "STATE", need_resolver = false（已有 valid_to）
+
+# STATE 示例 3：伤病状态
+text = "Salah is currently injured."
+# → fact_type = "STATE", need_resolver = true（需要推理恢复时间）
+```
+
+### Need Resolver 判定
+
+Extractor 根据以下规则判定是否需要 resolver：
+
+```python
+if fact_type == "EVENT":
+    need_resolver = false  # 点事实，不需要有效期
+
+elif fact_type == "STATE":
+    if 已抽取到 valid_from 或 valid_to:
+        need_resolver = false  # 已有有效期，不需要 resolver
+    else:
+        need_resolver = true   # 缺失有效期，需要 resolver 推理
+```
+
+**决策表**：
+
+| fact_type | 有效期情况 | need_resolver | 说明 |
+|-----------|------------|---------------|------|
+| EVENT | - | ❌ false | 历史事件，不需要有效期 |
+| STATE | 有 valid_to | ❌ false | 已知结束时间，不需推理 |
+| STATE | 有 valid_from | ❌ false | 已知开始时间，不需推理 |
+| STATE | 无有效期 | ✅ true | 需要 resolver 推理 |
 
 ### 批量处理
 

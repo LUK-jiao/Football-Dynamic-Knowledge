@@ -94,7 +94,7 @@ class FootballAnchorExtractor:
             chunk: 语义分块，包含 block_id, text, source, publish_date
             
         Returns:
-            完整的分块数据，添加了 anchors 属性
+            完整的分块数据，添加了 anchors、fact_type、need_resolver 属性
         """
         text = chunk.get("text", "")
         source = chunk.get("source", "")
@@ -105,6 +105,12 @@ class FootballAnchorExtractor:
         temporal_anchors = self._extract_temporal_anchors(text, publish_date)
         sources = self._extract_sources(text, source)
         constraints = self._extract_constraints(text, participants)
+        
+        # 判定事实类型
+        fact_type = self._determine_fact_type(text, temporal_anchors, constraints)
+        
+        # 判定是否需要 resolver
+        need_resolver = self._determine_need_resolver(fact_type, temporal_anchors)
         
         # 构建输出
         result = {
@@ -117,7 +123,9 @@ class FootballAnchorExtractor:
                 "temporal_anchors": temporal_anchors,
                 "sources": sources,
                 "constraints": constraints
-            }
+            },
+            "fact_type": fact_type,
+            "need_resolver": need_resolver
         }
         
         return result
@@ -823,6 +831,171 @@ class FootballAnchorExtractor:
                             break
         
         return constraints
+    
+    def _determine_fact_type(self, text: str, temporal_anchors: List[Dict[str, Any]], 
+                            constraints: List[Dict[str, str]]) -> str:
+        """
+        判定事实类型：EVENT（历史事件）或 STATE（状态事实）
+        
+        判定规则（按优先级）：
+        Rule 1: 如果脱离"当前时间 now"，该事实无法判断真假 → STATE，否则 → EVENT
+        Rule 2: 明确时间点 + 过去时 → EVENT；无时间点 + 身份/状态描述 → STATE
+        Rule 3: 比赛结果/转会完成/历史行为 → EVENT；合同状态/职位/伤病 → STATE
+        
+        Args:
+            text: 输入文本
+            temporal_anchors: 时间锚点列表
+            constraints: 约束锚点列表
+            
+        Returns:
+            "EVENT" 或 "STATE"
+        """
+        text_lower = text.lower()
+        
+        # ====================================================================
+        # 优先级 1：最强规则 - 比分和比赛结果一定是 EVENT
+        # ====================================================================
+        for constraint in constraints:
+            if constraint.get("type") == ConstraintType.SCORE_STATUS:
+                return "EVENT"
+            if constraint.get("expected_state") == "match_completed":
+                return "EVENT"
+        
+        # ====================================================================
+        # 优先级 2：完成时态 + 动作动词 → EVENT
+        # ====================================================================
+        # 完成时态（has/have + 过去分词）
+        completion_patterns = [
+            r'\b(?:has|have)\s+(?:agreed|signed|joined|scored|won|completed|announced)\b',
+            r'\b(?:agreed|signed|joined)\s+(?:to|a|with)\b',  # agreed to join, signed a deal
+        ]
+        
+        for pattern in completion_patterns:
+            if re.search(pattern, text_lower):
+                # 但如果后面跟着 "until YEAR"（合同描述），可能是 STATE
+                if re.search(r'\buntil\s+\d{4}\b', text_lower):
+                    # 检查是否有 "signed ... until" 模式
+                    if re.search(r'\bsigned.*contract.*until\b', text_lower):
+                        return "STATE"  # 合同状态描述
+                return "EVENT"  # 历史动作
+        
+        # ====================================================================
+        # 优先级 3：STATE 强信号 - 身份/状态描述
+        # ====================================================================
+        state_patterns = [
+            r'\bis\s+(?:the\s+)?(?:head\s+)?coach\b',  # is the coach
+            r'\bis\s+(?:a\s+)?(?:player|forward|midfielder|defender|goalkeeper)\b',  # is a player
+            r'\bis\s+under\s+contract\b',  # is under contract
+            r'\bserves\s+as\b',  # serves as
+            r'\bremains\s+(?:at|with|a)\b',  # remains at/with/a
+            r'\bcurrently\s+(?:is|plays|works)\b',  # currently is
+            r'\bis\s+(?:injured|suspended|available|fit)\b',  # is injured
+            r'\b(?:runs|lasts)\s+(?:from|until)\b',  # runs from/until (租借期限)
+        ]
+        
+        for pattern in state_patterns:
+            if re.search(pattern, text_lower):
+                return "STATE"
+        
+        # ====================================================================
+        # 优先级 4：约束类型判定
+        # ====================================================================
+        for constraint in constraints:
+            constraint_type = constraint.get("type")
+            expected_state = constraint.get("expected_state", "")
+            
+            # contract_active 可能是 STATE（如果不是签约动作）
+            if constraint_type == ConstraintType.CONTRACT_STATUS:
+                if expected_state == "contract_active":
+                    # 如果没有明确的签约动作，判定为 STATE
+                    if not re.search(r'\b(?:signed|agreed|completed).*(?:deal|contract|transfer)\b', text_lower):
+                        return "STATE"
+            
+            # 伤病/停赛状态（injured, suspended）
+            if constraint_type in [ConstraintType.INJURY_STATUS, ConstraintType.SUSPENSION_STATUS]:
+                # 如果没有"受伤"动作（suffered, underwent），判定为 STATE
+                if not re.search(r'\b(?:suffered|underwent|received|announced)\b', text_lower):
+                    return "STATE"
+            
+            # transfer_possible 通常是 EVENT（协议达成）
+            if expected_state == "transfer_possible":
+                if re.search(r'\b(?:has|have)\s+agreed\b', text_lower):
+                    return "EVENT"
+        
+        # ====================================================================
+        # 优先级 5：时间锚点 + 动词时态
+        # ====================================================================
+        has_explicit_time = any(
+            anchor.get("time_type") in ["EXPLICIT", "RELATIVE"] 
+            for anchor in temporal_anchors
+        )
+        
+        # 有明确时间点 + 过去时动词 → EVENT
+        if has_explicit_time:
+            past_verbs = [r'\b(?:scored|won|lost|played|joined|signed|agreed|announced)\b']
+            for pattern in past_verbs:
+                if re.search(pattern, text_lower):
+                    return "EVENT"
+        
+        # ====================================================================
+        # 优先级 6：历史关键词
+        # ====================================================================
+        historical_patterns = [
+            r'\bin\s+\d{4}\b',  # in 2021
+            r'\bin\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\b',
+            r'\blast\s+season\b',
+            r'\bscored.*goals?\b',
+            r'\bwon.*(?:Cup|League|Trophy)\b',
+        ]
+        
+        for pattern in historical_patterns:
+            if re.search(pattern, text_lower):
+                return "EVENT"
+        
+        # ====================================================================
+        # 优先级 7：默认兜底
+        # ====================================================================
+        # 如果有现在时动词但没有明确时间 → STATE
+        if re.search(r'\b(?:is|are|remains|currently)\b', text_lower) and not has_explicit_time:
+            return "STATE"
+        
+        # 最终兜底：默认为 EVENT（保守策略）
+        return "EVENT"
+    
+    def _determine_need_resolver(self, fact_type: str, 
+                                 temporal_anchors: List[Dict[str, Any]]) -> bool:
+        """
+        判定是否需要 resolver 进行有效期推理
+        
+        规则：
+        - EVENT → need_resolver = false（点事实，不需要有效期）
+        - STATE + 已有 valid_from/valid_to → need_resolver = false
+        - STATE + 缺失有效期 → need_resolver = true
+        
+        Args:
+            fact_type: 事实类型（EVENT 或 STATE）
+            temporal_anchors: 时间锚点列表
+            
+        Returns:
+            是否需要 resolver
+        """
+        # EVENT 类型：天然是点事实，不需要 resolver
+        if fact_type == "EVENT":
+            return False
+        
+        # STATE 类型：检查是否已有明确的有效期
+        if fact_type == "STATE":
+            # 检查是否已通过规则抽取到 valid_from 或 valid_to
+            for anchor in temporal_anchors:
+                if anchor.get("valid_from") is not None or anchor.get("valid_to") is not None:
+                    # 已有有效期，不需要 resolver
+                    return False
+            
+            # 没有有效期信息，需要 resolver 推理
+            return True
+        
+        # 兜底：默认不需要（保守策略）
+        return False
 
 
 # 保留旧的 FootballNER 类以保持向后兼容
