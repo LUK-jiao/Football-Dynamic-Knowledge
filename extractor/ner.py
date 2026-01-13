@@ -969,7 +969,7 @@ class FootballAnchorExtractor:
         
         规则：
         - EVENT → need_resolver = false（点事实，不需要有效期）
-        - STATE + 已有 valid_from/valid_to → need_resolver = false
+        - STATE + 已有 valid_from & valid_to → need_resolver = false
         - STATE + 缺失有效期 → need_resolver = true
         
         Args:
@@ -985,9 +985,9 @@ class FootballAnchorExtractor:
         
         # STATE 类型：检查是否已有明确的有效期
         if fact_type == "STATE":
-            # 检查是否已通过规则抽取到 valid_from 或 valid_to
+            # 检查是否已通过规则抽取到 valid_from 和 valid_to
             for anchor in temporal_anchors:
-                if anchor.get("valid_from") is not None or anchor.get("valid_to") is not None:
+                if anchor.get("valid_from") is not None and anchor.get("valid_to") is not None:
                     # 已有有效期，不需要 resolver
                     return False
             
@@ -996,43 +996,3 @@ class FootballAnchorExtractor:
         
         # 兜底：默认不需要（保守策略）
         return False
-
-
-# 保留旧的 FootballNER 类以保持向后兼容
-class FootballNER:
-    """
-    Football-specific Named Entity Recognition.
-    
-    已弃用：请使用 FootballAnchorExtractor 进行锚点抽取。
-    该类保留仅用于向后兼容。
-    """
-    
-    def __init__(self, model_name: Optional[str] = None):
-        """
-        Initialize NER model.
-        
-        Args:
-            model_name: Optional model identifier
-        """
-        self.model_name = model_name
-        self.extractor = FootballAnchorExtractor()
-    
-    def extract_entities(self, text: str) -> List[Dict[str, Any]]:
-        """
-        Extract named entities from text.
-        
-        Args:
-            text: Input text
-            
-        Returns:
-            List of extracted entities with type and position
-        """
-        # 使用新的锚点抽取器
-        chunk = {
-            "block_id": "legacy",
-            "text": text,
-            "source": "",
-            "publish_date": ""
-        }
-        result = self.extractor.extract_anchors(chunk)
-        return result["anchors"]["participants"]

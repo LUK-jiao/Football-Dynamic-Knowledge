@@ -188,7 +188,7 @@ if fact_type == "EVENT":
     need_resolver = false  # 点事实，不需要有效期
 
 elif fact_type == "STATE":
-    if 已抽取到 valid_from 或 valid_to:
+    if 已抽取到 valid_from 和 valid_to:
         need_resolver = false  # 已有有效期，不需要 resolver
     else:
         need_resolver = true   # 缺失有效期，需要 resolver 推理
