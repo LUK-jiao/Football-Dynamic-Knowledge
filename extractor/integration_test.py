@@ -133,7 +133,6 @@ def test_pipeline(raw_text: str, source: str, publish_date: str, test_name: str)
     print(f"✅ 分块结果: {len(chunks)} 个语义块")
     for i, chunk in enumerate(chunks, 1):
         print(f"  块 {i}:")
-        print(f"    类型: {chunk.chunk_type}")
         print(f"    句子数: {len(chunk.sentences)}")
         print(f"    预览: {' '.join(chunk.sentences)[:80]}...")
     
@@ -236,6 +235,9 @@ def test_pipeline(raw_text: str, source: str, publish_date: str, test_name: str)
                 print(f"    状态: {c['expected_state']}")
         else:
             print("  (无)")
+
+        print(f"\n fact_type: {output.get('fact_type', 'N/A')}")
+        print(f"\n need_resolver: {output.get('need_resolver', 'N/A')}")
     
     # ========================================================================
     # 步骤 7: 统计汇总

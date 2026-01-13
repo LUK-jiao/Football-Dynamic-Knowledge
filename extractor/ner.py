@@ -46,6 +46,14 @@ class ConstraintType(str, Enum):
     SUSPENSION_STATUS = "SUSPENSION_STATUS"
 
 
+class TimeGranularity(str, Enum):
+    """时间粒度枚举"""
+    YEAR = "YEAR"           # 年份：2021
+    MONTH = "MONTH"         # 年月：2021-09
+    DAY = "DAY"             # 完整日期：2021-09-01
+    DURATION = "DURATION"   # 时间段：four-and-a-half year
+
+
 class FootballAnchorExtractor:
     """
     足球领域锚点抽取器
@@ -90,6 +98,11 @@ class FootballAnchorExtractor:
         """
         从语义分块中提取所有锚点
         
+        使用 Temporal Aligner 架构：
+        1. 时间表达式提取（识别所有时间表达）
+        2. 事件候选识别（识别所有潜在事件）
+        3. 时间-事件对齐（生成时间锚点）
+        
         Args:
             chunk: 语义分块，包含 block_id, text, source, publish_date
             
@@ -102,12 +115,18 @@ class FootballAnchorExtractor:
         
         # 提取四类锚点
         participants = self._extract_participants(text)
-        temporal_anchors = self._extract_temporal_anchors(text, publish_date)
-        sources = self._extract_sources(text, source)
         constraints = self._extract_constraints(text, participants)
+        sources = self._extract_sources(text, source)
         
-        # 判定事实类型
-        fact_type = self._determine_fact_type(text, temporal_anchors, constraints)
+        # 先判定 fact_type（不依赖 temporal_anchors）
+        fact_type = self._determine_fact_type(text, constraints)
+        
+        # 使用 Temporal Aligner 提取时间锚点
+        time_expressions = self._extract_time_expressions(text, publish_date)
+        event_candidates = self._extract_event_candidates(text)
+        temporal_anchors = self._align_temporal_anchors(
+            event_candidates, time_expressions, publish_date, fact_type
+        )
         
         # 判定是否需要 resolver
         need_resolver = self._determine_need_resolver(fact_type, temporal_anchors)
@@ -225,406 +244,6 @@ class FootballAnchorExtractor:
                     seen.add(name)
         
         return participants
-    
-    def _extract_temporal_anchors(self, text: str, publish_date: str) -> List[Dict[str, Any]]:
-        """
-        提取时间锚点（严格遵守时间语义分类）
-        
-        时间锚点的五种语义：
-        T1. EXPLICIT - 显式时间点（文本直接出现的具体日期）
-        T2. RELATIVE - 相对时间（基于 publish_date 可安全解析的）
-        T3. VALID_FROM - 时间区间起点（明确声明"从某时开始"）
-        T4. VALID_TO - 时间区间终点（明确声明"到某时为止"）
-        T5. FALLBACK - 事件默认时间（完全无时间信息时使用 publish_date）
-        
-        Args:
-            text: 输入文本
-            publish_date: 发布日期 (YYYY-MM-DD)
-            
-        Returns:
-            时间锚点列表，格式：[{
-                "event_date": "YYYY-MM-DD | YYYY-MM | null",
-                "valid_from": "YYYY-MM-DD | YYYY-MM | null",
-                "valid_to": "YYYY-MM-DD | YYYY-MM | null",
-                "time_type": "EXPLICIT | RELATIVE | VALID_FROM | VALID_TO | FALLBACK",
-                "evidence": "原始文本片段"
-            }, ...]
-        """
-        temporal_anchors = []
-        seen_evidence = set()  # 避免重复提取同一时间表达
-        
-        # ====================================================================
-        # T1. 显式时间点（Explicit Date）
-        # ====================================================================
-        explicit_anchors = self._extract_explicit_dates(text, seen_evidence)
-        temporal_anchors.extend(explicit_anchors)
-        
-        # ====================================================================
-        # T2. 相对时间（Relative Date）
-        # ====================================================================
-        if publish_date:
-            relative_anchors = self._parse_relative_dates(text, publish_date, seen_evidence)
-            temporal_anchors.extend(relative_anchors)
-        
-        # ====================================================================
-        # T3. 时间区间起点（Validity Start）
-        # ====================================================================
-        valid_from_anchors = self._extract_valid_from(text, publish_date, seen_evidence)
-        temporal_anchors.extend(valid_from_anchors)
-        
-        # ====================================================================
-        # T4. 时间区间终点（Validity End）
-        # ====================================================================
-        valid_to_anchors = self._extract_valid_to(text, publish_date, seen_evidence)
-        temporal_anchors.extend(valid_to_anchors)
-        
-        # ====================================================================
-        # T5. 事件默认时间（Fallback Event Date）
-        # ====================================================================
-        # 仅当完全没有任何时间表达时，才使用 publish_date 作为兜底
-        if not temporal_anchors and publish_date:
-            temporal_anchors.append({
-                "event_date": publish_date,
-                "valid_from": None,
-                "valid_to": None,
-                "time_type": "FALLBACK",
-                "evidence": f"[无显式时间，使用发布日期: {publish_date}]"
-            })
-        
-        return temporal_anchors
-    
-    def _extract_explicit_dates(self, text: str, seen_evidence: set) -> List[Dict[str, Any]]:
-        """
-        提取显式时间点（T1）
-        
-        支持格式：
-        - 完整日期: 2025-09-01, 1 September 2025, September 1, 2025
-        - 年月: in September 2025, during March 2023
-        - 年份/赛季: in 2021, the 2021 season
-        """
-        anchors = []
-        
-        # 1. 完整日期格式
-        date_patterns = [
-            (r'\b(\d{4})-(\d{2})-(\d{2})\b', "full_date"),  # 2025-09-01
-            (r'\b(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b', "full_date"),  # 01/09/2025
-            (r'\bon\s+(\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4})\b', "full_date"),  # on 14 January
-            (r'\b((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', "full_date"),  # September 1, 2025
-        ]
-        
-        for pattern, date_type in date_patterns:
-            matches = re.finditer(pattern, text, re.IGNORECASE)
-            for match in matches:
-                evidence = match.group(0).strip()
-                if evidence in seen_evidence:
-                    continue
-                
-                date_str = self._normalize_date(evidence)
-                if date_str:
-                    anchors.append({
-                        "event_date": date_str,
-                        "valid_from": None,
-                        "valid_to": None,
-                        "time_type": "EXPLICIT",
-                        "evidence": evidence
-                    })
-                    seen_evidence.add(evidence)
-        
-        # 2. 年月格式（in September 2025, during March 2023）
-        month_year_pattern = r'\b(?:in|during)\s+((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4})\b'
-        matches = re.finditer(month_year_pattern, text, re.IGNORECASE)
-        for match in matches:
-            evidence = match.group(0).strip()
-            if evidence in seen_evidence:
-                continue
-            
-            month_year = match.group(1)
-            date_str = self._normalize_date(month_year + " 01")  # 转为月初
-            if date_str:
-                # 只保留年月
-                year_month = date_str[:7]  # YYYY-MM
-                anchors.append({
-                    "event_date": year_month,
-                    "valid_from": None,
-                    "valid_to": None,
-                    "time_type": "EXPLICIT",
-                    "evidence": evidence
-                })
-                seen_evidence.add(evidence)
-        
-        # 3. 赛季格式（the 2021 season, 2021/22 season）
-        season_patterns = [
-            r'\bthe\s+(\d{4})\s+season\b',
-            r'\b(\d{4})/\d{2}\s+season\b',
-        ]
-        for pattern in season_patterns:
-            matches = re.finditer(pattern, text, re.IGNORECASE)
-            for match in matches:
-                evidence = match.group(0).strip()
-                if evidence in seen_evidence:
-                    continue
-                
-                year = match.group(1)
-                anchors.append({
-                    "event_date": year,  # 只保留年份
-                    "valid_from": None,
-                    "valid_to": None,
-                    "time_type": "EXPLICIT",
-                    "evidence": evidence
-                })
-                seen_evidence.add(evidence)
-        
-        return anchors
-    
-    def _extract_valid_from(self, text: str, publish_date: str, seen_evidence: set) -> List[Dict[str, Any]]:
-        """
-        提取时间区间起点（T3）
-        
-        只有文本明确声明"从某时开始"时才提取
-        关键词：from, starting, beginning, since
-        """
-        anchors = []
-        
-        # 匹配模式：from/starting/beginning + 时间表达
-        patterns = [
-            r'\b(?:from|starting|beginning)\s+((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4})\b',
-            r'\b(?:from|starting|beginning)\s+(\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4})\b',
-            r'\b(?:from|since)\s+(next\s+(?:week|month|season|year))\b',
-            r'\b(?:from|since)\s+(today|tomorrow|yesterday)\b',
-        ]
-        
-        for pattern in patterns:
-            matches = re.finditer(pattern, text, re.IGNORECASE)
-            for match in matches:
-                evidence = match.group(0).strip()
-                if evidence in seen_evidence:
-                    continue
-                
-                time_expr = match.group(1).strip()
-                
-                # 尝试解析为具体日期
-                date_str = self._normalize_date(time_expr)
-                if not date_str and publish_date:
-                    # 尝试作为相对时间解析
-                    date_str = self._resolve_relative_time(time_expr, publish_date)
-                
-                if date_str:
-                    anchors.append({
-                        "event_date": None,
-                        "valid_from": date_str,
-                        "valid_to": None,
-                        "time_type": "VALID_FROM",
-                        "evidence": evidence
-                    })
-                    seen_evidence.add(evidence)
-        
-        return anchors
-    
-    def _extract_valid_to(self, text: str, publish_date: str, seen_evidence: set) -> List[Dict[str, Any]]:
-        """
-        提取时间区间终点（T4）
-        
-        只有文本明确声明"到某时为止"时才提取
-        关键词：until, till, through, by, to
-        """
-        anchors = []
-        
-        # 匹配模式：until/till/through + 时间表达
-        patterns = [
-            r'\b(?:until|till|through)\s+(\d{4})\b',  # until 2028
-            r'\b(?:until|till|through)\s+((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4})\b',
-            r'\b(?:until|till|through)\s+(\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4})\b',
-            r'\b(?:until|till|through)\s+the\s+end\s+of\s+(?:the\s+)?(\d{4})\s+season\b',
-            r'\b(?:by|to)\s+(next\s+(?:week|month|season|year))\b',
-        ]
-        
-        for pattern in patterns:
-            matches = re.finditer(pattern, text, re.IGNORECASE)
-            for match in matches:
-                evidence = match.group(0).strip()
-                if evidence in seen_evidence:
-                    continue
-                
-                time_expr = match.group(1).strip()
-                
-                # 尝试解析为具体日期
-                date_str = self._normalize_date(time_expr)
-                if not date_str:
-                    # 可能只是年份
-                    if re.match(r'^\d{4}$', time_expr):
-                        date_str = time_expr
-                    elif publish_date:
-                        # 尝试作为相对时间解析
-                        date_str = self._resolve_relative_time(time_expr, publish_date)
-                
-                if date_str:
-                    anchors.append({
-                        "event_date": None,
-                        "valid_from": None,
-                        "valid_to": date_str,
-                        "time_type": "VALID_TO",
-                        "evidence": evidence
-                    })
-                    seen_evidence.add(evidence)
-        
-        return anchors
-    
-    def _normalize_date(self, date_str: str) -> Optional[str]:
-        """
-        标准化日期为 YYYY-MM-DD 格式
-        
-        Args:
-            date_str: 原始日期字符串
-            
-        Returns:
-            标准化后的日期字符串，或 None
-        """
-        # 尝试多种日期格式
-        formats = [
-            "%Y-%m-%d",
-            "%d/%m/%Y",
-            "%m/%d/%Y",
-            "%B %d, %Y",
-            "%d %B %Y",
-            "%b %d, %Y",
-            "%d %b %Y",
-        ]
-        
-        for fmt in formats:
-            try:
-                dt = datetime.strptime(date_str, fmt)
-                return dt.strftime("%Y-%m-%d")
-            except ValueError:
-                continue
-        
-        return None
-    
-    def _parse_relative_dates(self, text: str, publish_date: str, seen_evidence: set) -> List[Dict[str, Any]]:
-        """
-        解析相对时间（T2）
-        
-        只解析可以安全转换为具体日期的相对时间表达
-        不可解析的（如 "recently", "soon"）直接忽略
-        
-        Args:
-            text: 输入文本
-            publish_date: 发布日期 (YYYY-MM-DD)
-            seen_evidence: 已提取的证据集合
-            
-        Returns:
-            相对时间锚点列表
-        """
-        temporal_anchors = []
-        
-        try:
-            base_date = datetime.strptime(publish_date, "%Y-%m-%d")
-        except Exception:
-            return temporal_anchors
-        
-        # 相对日期模式（天数偏移）
-        relative_patterns = {
-            r'\btoday\b': 0,
-            r'\btomorrow\b': 1,
-            r'\byesterday\b': -1,
-            r'\bnext week\b': 7,
-            r'\blast week\b': -7,
-            r'\bnext month\b': 30,
-            r'\blast month\b': -30,
-        }
-        
-        for pattern, days_offset in relative_patterns.items():
-            matches = re.finditer(pattern, text, re.IGNORECASE)
-            for match in matches:
-                evidence = match.group(0).strip()
-                if evidence in seen_evidence:
-                    continue
-                
-                event_date = base_date + timedelta(days=days_offset)
-                date_str = event_date.strftime("%Y-%m-%d")
-                
-                temporal_anchors.append({
-                    "event_date": date_str,
-                    "valid_from": None,
-                    "valid_to": None,
-                    "time_type": "RELATIVE",
-                    "evidence": evidence
-                })
-                seen_evidence.add(evidence)
-        
-        # 相对赛季（需要上下文判断，目前仅支持明确的）
-        season_patterns = {
-            r'\bthis season\b': 0,
-            r'\blast season\b': -1,
-            r'\bnext season\b': 1,
-        }
-        
-        for pattern, season_offset in season_patterns.items():
-            matches = re.finditer(pattern, text, re.IGNORECASE)
-            for match in matches:
-                evidence = match.group(0).strip()
-                if evidence in seen_evidence:
-                    continue
-                
-                # 假设赛季从当年开始（简化处理）
-                current_year = base_date.year
-                season_year = current_year + season_offset
-                
-                temporal_anchors.append({
-                    "event_date": str(season_year),  # 只保留年份
-                    "valid_from": None,
-                    "valid_to": None,
-                    "time_type": "RELATIVE",
-                    "evidence": evidence
-                })
-                seen_evidence.add(evidence)
-        
-        return temporal_anchors
-    
-    def _resolve_relative_time(self, time_expr: str, publish_date: str) -> Optional[str]:
-        """
-        辅助方法：将相对时间表达解析为具体日期
-        
-        Args:
-            time_expr: 相对时间表达（如 "next week", "tomorrow"）
-            publish_date: 发布日期 (YYYY-MM-DD)
-            
-        Returns:
-            解析后的日期字符串，或 None
-        """
-        try:
-            base_date = datetime.strptime(publish_date, "%Y-%m-%d")
-        except Exception:
-            return None
-        
-        time_expr_lower = time_expr.lower()
-        
-        # 简单的相对时间映射
-        offset_map = {
-            "today": 0,
-            "tomorrow": 1,
-            "yesterday": -1,
-            "next week": 7,
-            "last week": -7,
-            "next month": 30,
-            "last month": -30,
-            "next year": 365,
-            "last year": -365,
-        }
-        
-        if time_expr_lower in offset_map:
-            result_date = base_date + timedelta(days=offset_map[time_expr_lower])
-            return result_date.strftime("%Y-%m-%d")
-        
-        # 赛季表达
-        if "season" in time_expr_lower:
-            if "next" in time_expr_lower:
-                return str(base_date.year + 1)
-            elif "last" in time_expr_lower:
-                return str(base_date.year - 1)
-            elif "this" in time_expr_lower:
-                return str(base_date.year)
-        
-        return None
     
     def _extract_sources(self, text: str, source: str) -> List[Dict[str, str]]:
         """
@@ -832,8 +451,7 @@ class FootballAnchorExtractor:
         
         return constraints
     
-    def _determine_fact_type(self, text: str, temporal_anchors: List[Dict[str, Any]], 
-                            constraints: List[Dict[str, str]]) -> str:
+    def _determine_fact_type(self, text: str, constraints: List[Dict[str, str]]) -> str:
         """
         判定事实类型：EVENT（历史事件）或 STATE（状态事实）
         
@@ -844,7 +462,6 @@ class FootballAnchorExtractor:
         
         Args:
             text: 输入文本
-            temporal_anchors: 时间锚点列表
             constraints: 约束锚点列表
             
         Returns:
@@ -852,115 +469,84 @@ class FootballAnchorExtractor:
         """
         text_lower = text.lower()
         
-        # ====================================================================
-        # 优先级 1：最强规则 - 比分和比赛结果一定是 EVENT
-        # ====================================================================
+        # 优先级 1：比分和比赛结果一定是 EVENT
         for constraint in constraints:
             if constraint.get("type") == ConstraintType.SCORE_STATUS:
                 return "EVENT"
             if constraint.get("expected_state") == "match_completed":
                 return "EVENT"
         
-        # ====================================================================
         # 优先级 2：完成时态 + 动作动词 → EVENT
-        # ====================================================================
-        # 完成时态（has/have + 过去分词）
         completion_patterns = [
             r'\b(?:has|have)\s+(?:agreed|signed|joined|scored|won|completed|announced)\b',
-            r'\b(?:agreed|signed|joined)\s+(?:to|a|with)\b',  # agreed to join, signed a deal
+            r'\b(?:agreed|signed|joined)\s+(?:to|a|with)\b',
         ]
         
         for pattern in completion_patterns:
             if re.search(pattern, text_lower):
-                # 但如果后面跟着 "until YEAR"（合同描述），可能是 STATE
                 if re.search(r'\buntil\s+\d{4}\b', text_lower):
-                    # 检查是否有 "signed ... until" 模式
                     if re.search(r'\bsigned.*contract.*until\b', text_lower):
-                        return "STATE"  # 合同状态描述
-                return "EVENT"  # 历史动作
+                        return "STATE"
+                return "EVENT"
         
-        # ====================================================================
         # 优先级 3：STATE 强信号 - 身份/状态描述
-        # ====================================================================
         state_patterns = [
-            r'\bis\s+(?:the\s+)?(?:head\s+)?coach\b',  # is the coach
-            r'\bis\s+(?:a\s+)?(?:player|forward|midfielder|defender|goalkeeper)\b',  # is a player
-            r'\bis\s+under\s+contract\b',  # is under contract
-            r'\bserves\s+as\b',  # serves as
-            r'\bremains\s+(?:at|with|a)\b',  # remains at/with/a
-            r'\bcurrently\s+(?:is|plays|works)\b',  # currently is
-            r'\bis\s+(?:injured|suspended|available|fit)\b',  # is injured
-            r'\b(?:runs|lasts)\s+(?:from|until)\b',  # runs from/until (租借期限)
+            r'\bis\s+(?:the\s+)?(?:head\s+)?coach\b',
+            r'\bis\s+(?:a\s+)?(?:player|forward|midfielder|defender|goalkeeper)\b',
+            r'\bis\s+under\s+contract\b',
+            r'\bserves\s+as\b',
+            r'\bremains\s+(?:at|with|a)\b',
+            r'\bcurrently\s+(?:is|plays|works)\b',
+            r'\bis\s+(?:injured|suspended|available|fit)\b',
+            r'\b(?:runs|lasts)\s+(?:from|until)\b',
         ]
         
         for pattern in state_patterns:
             if re.search(pattern, text_lower):
                 return "STATE"
         
-        # ====================================================================
         # 优先级 4：约束类型判定
-        # ====================================================================
         for constraint in constraints:
             constraint_type = constraint.get("type")
             expected_state = constraint.get("expected_state", "")
             
-            # contract_active 可能是 STATE（如果不是签约动作）
             if constraint_type == ConstraintType.CONTRACT_STATUS:
                 if expected_state == "contract_active":
-                    # 如果没有明确的签约动作，判定为 STATE
                     if not re.search(r'\b(?:signed|agreed|completed).*(?:deal|contract|transfer)\b', text_lower):
                         return "STATE"
             
-            # 伤病/停赛状态（injured, suspended）
             if constraint_type in [ConstraintType.INJURY_STATUS, ConstraintType.SUSPENSION_STATUS]:
-                # 如果没有"受伤"动作（suffered, underwent），判定为 STATE
                 if not re.search(r'\b(?:suffered|underwent|received|announced)\b', text_lower):
                     return "STATE"
             
-            # transfer_possible 通常是 EVENT（协议达成）
             if expected_state == "transfer_possible":
                 if re.search(r'\b(?:has|have)\s+agreed\b', text_lower):
                     return "EVENT"
         
-        # ====================================================================
-        # 优先级 5：时间锚点 + 动词时态
-        # ====================================================================
-        has_explicit_time = any(
-            anchor.get("time_type") in ["EXPLICIT", "RELATIVE"] 
-            for anchor in temporal_anchors
-        )
+        # 优先级 5：文本中的时间表达 + 动词时态
+        has_explicit_time = bool(re.search(r'\bin\s+\d{4}\b|\bon\s+\d{1,2}\s+\w+\s+\d{4}\b', text_lower))
         
-        # 有明确时间点 + 过去时动词 → EVENT
         if has_explicit_time:
             past_verbs = [r'\b(?:scored|won|lost|played|joined|signed|agreed|announced)\b']
             for pattern in past_verbs:
                 if re.search(pattern, text_lower):
                     return "EVENT"
         
-        # ====================================================================
         # 优先级 6：历史关键词
-        # ====================================================================
         historical_patterns = [
-            r'\bin\s+\d{4}\b',  # in 2021
-            r'\bin\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\b',
+            r'\bin\s+\d{4}\b',
             r'\blast\s+season\b',
             r'\bscored.*goals?\b',
-            r'\bwon.*(?:Cup|League|Trophy)\b',
+            r'\bwon.*(?:cup|trophy|title|award)\b',
+            r'\bdefeated|beat|drew\b',
         ]
         
         for pattern in historical_patterns:
             if re.search(pattern, text_lower):
                 return "EVENT"
         
-        # ====================================================================
-        # 优先级 7：默认兜底
-        # ====================================================================
-        # 如果有现在时动词但没有明确时间 → STATE
-        if re.search(r'\b(?:is|are|remains|currently)\b', text_lower) and not has_explicit_time:
-            return "STATE"
-        
-        # 最终兜底：默认为 EVENT（保守策略）
-        return "EVENT"
+        # 默认：STATE
+        return "STATE"
     
     def _determine_need_resolver(self, fact_type: str, 
                                  temporal_anchors: List[Dict[str, Any]]) -> bool:
@@ -996,3 +582,371 @@ class FootballAnchorExtractor:
         
         # 兜底：默认不需要（保守策略）
         return False
+    
+    def _extract_time_expressions(self, text: str, publish_date: str) -> List[Dict[str, Any]]:
+        """
+        提取时间表达式（职责缩减版）
+        
+        职责：仅识别文本中的时间表达，不判定其与事件的对应关系
+        
+        Returns:
+            [{
+                "time_id": "T1",
+                "evidence": "in 2021",
+                "normalized": "2021",
+                "granularity": "YEAR",  # YEAR/MONTH/DAY/DURATION
+                "span": (start, end)
+            }, ...]
+        """
+        time_expressions = []
+        time_id_counter = 1
+        seen_evidence = set()
+        
+        # 1. 年份（in 2021, during 2023, the 2021 season）
+        year_patterns = [
+            r'\bin\s+(\d{4})\b',
+            r'\bduring\s+(\d{4})\b',
+            r'\bthe\s+(\d{4})\s+season\b',
+            r'\b(\d{4})/\d{2}\s+season\b',
+        ]
+        for pattern in year_patterns:
+            for match in re.finditer(pattern, text, re.IGNORECASE):
+                evidence = match.group(0).strip()
+                if evidence in seen_evidence:
+                    continue
+                year = match.group(1)
+                time_expressions.append({
+                    "time_id": f"T{time_id_counter}",
+                    "evidence": evidence,
+                    "normalized": year,
+                    "granularity": TimeGranularity.YEAR,
+                    "span": (match.start(), match.end())
+                })
+                seen_evidence.add(evidence)
+                time_id_counter += 1
+        
+        # 2. 完整日期（1 September 2025, September 1, 2025, 2025-09-01）
+        date_patterns = [
+            (r'\b(\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4})\b', 'dmy'),
+            (r'\b((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', 'mdy'),
+            (r'\b(\d{4}-\d{2}-\d{2})\b', 'iso'),
+        ]
+        for pattern, fmt in date_patterns:
+            for match in re.finditer(pattern, text, re.IGNORECASE):
+                evidence = match.group(1).strip()
+                if evidence in seen_evidence:
+                    continue
+                normalized = self._normalize_date(evidence)
+                if normalized:
+                    time_expressions.append({
+                        "time_id": f"T{time_id_counter}",
+                        "evidence": evidence,
+                        "normalized": normalized,
+                        "granularity": TimeGranularity.DAY,
+                        "span": (match.start(), match.end())
+                    })
+                    seen_evidence.add(evidence)
+                    time_id_counter += 1
+        
+        # 3. 年月（in September 2025, during March 2023）
+        month_year_pattern = r'\b(?:in|during)\s+((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4})\b'
+        for match in re.finditer(month_year_pattern, text, re.IGNORECASE):
+            evidence = match.group(0).strip()
+            if evidence in seen_evidence:
+                continue
+            month_year = match.group(1)
+            normalized = self._normalize_date(month_year + " 01")
+            if normalized:
+                year_month = normalized[:7]  # YYYY-MM
+                time_expressions.append({
+                    "time_id": f"T{time_id_counter}",
+                    "evidence": evidence,
+                    "normalized": year_month,
+                    "granularity": TimeGranularity.MONTH,
+                    "span": (match.start(), match.end())
+                })
+                seen_evidence.add(evidence)
+                time_id_counter += 1
+        
+        # 4. Duration（four-and-a-half year contract, five-year deal）
+        duration_patterns = [
+            r'\b(\w+(?:-\w+)*)\s+year\s+(?:contract|deal)\b',
+            r'\b(\d+)\s+year\s+(?:contract|deal)\b',
+            r'\b(\w+)\s+(?:year|month|week)\s+(?:contract|deal)\b',
+        ]
+        for pattern in duration_patterns:
+            for match in re.finditer(pattern, text, re.IGNORECASE):
+                evidence = match.group(0).strip()
+                if evidence in seen_evidence:
+                    continue
+                duration = match.group(1)
+                time_expressions.append({
+                    "time_id": f"T{time_id_counter}",
+                    "evidence": evidence,
+                    "normalized": duration,
+                    "granularity": TimeGranularity.DURATION,
+                    "span": (match.start(), match.end())
+                })
+                seen_evidence.add(evidence)
+                time_id_counter += 1
+        
+        return time_expressions
+    
+    def _extract_event_candidates(self, text: str) -> List[Dict[str, Any]]:
+        """
+        提取事件候选（新增）
+        
+        职责：识别文本中的所有潜在事件，包括并列事件
+        
+        Returns:
+            [{
+                "event_id": "E1",
+                "trigger": "won",
+                "span_text": "won the MLS Cup",
+                "span": (start, end)
+            }, ...]
+        """
+        events = []
+        event_id_counter = 1
+        
+        # 先按连接词切分文本（before, after, since, until, when）
+        split_pattern = r'\s+(before|after|since|until|when)\s+'
+        segments = re.split(split_pattern, text, flags=re.IGNORECASE)
+        
+        current_pos = 0
+        for i, segment in enumerate(segments):
+            # 跳过连接词本身
+            if i % 2 == 1 and segment.lower() in ['before', 'after', 'since', 'until', 'when']:
+                current_pos += len(segment) + 2  # +2 for spaces
+                continue
+            
+            if not segment.strip():
+                continue
+            
+            segment_start = current_pos
+            
+            # 动词模式（过去时、动名词、完成时、现在时）
+            verb_patterns = [
+                (r'\b(won|scored|joined|signed|agreed|completed|announced|played|left|arrived)\b', 'past'),
+                (r'\b(winning|scoring|joining|signing|agreeing|completing|announcing|playing|leaving|arriving)\b', 'gerund'),
+                (r'\b(?:has|have)\s+(signed|joined|agreed|scored|won|completed)\b', 'perfect'),
+                (r'\b(is|are|was|were|remains|serves)\b\s+(?:the\s+)?(?:head\s+)?(?:coach|player|under\s+contract)', 'state'),
+            ]
+            
+            found_events = []
+            for pattern, verb_type in verb_patterns:
+                for match in re.finditer(pattern, segment, re.IGNORECASE):
+                    verb = match.group(1)
+                    verb_start = segment_start + match.start()
+                    
+                    # 提取事件 span（动词 + 后续内容，直到句号或连接词）
+                    remaining_text = text[verb_start:]
+                    span_end_match = re.search(r'[.;]|\s+(and|before|after|since|until|when)\s+', remaining_text)
+                    if span_end_match:
+                        span_end = verb_start + span_end_match.start()
+                    else:
+                        span_end = min(verb_start + 100, len(text))
+                    
+                    span_text = text[verb_start:span_end].strip()
+                    
+                    # 避免重复
+                    if not any(e['span'] == (verb_start, span_end) for e in found_events):
+                        found_events.append({
+                            "event_id": f"E{event_id_counter}",
+                            "trigger": verb,
+                            "span_text": span_text,
+                            "span": (verb_start, span_end)
+                        })
+                        event_id_counter += 1
+            
+            # 处理并列事件（"and" 连接的多个动词）
+            and_pattern = r'\band\s+(won|scored|joined|signed|agreed|completed|played)\b'
+            for match in re.finditer(and_pattern, segment, re.IGNORECASE):
+                verb = match.group(1)
+                verb_start = segment_start + match.start() + len('and ')
+                
+                remaining_text = text[verb_start:]
+                span_end_match = re.search(r'[.;]|\s+(and|before|after|since|until)\s+', remaining_text)
+                if span_end_match:
+                    span_end = verb_start + span_end_match.start()
+                else:
+                    span_end = min(verb_start + 80, len(text))
+                
+                span_text = text[verb_start:span_end].strip()
+                
+                if not any(e['span'] == (verb_start, span_end) for e in found_events):
+                    found_events.append({
+                        "event_id": f"E{event_id_counter}",
+                        "trigger": verb,
+                        "span_text": span_text,
+                        "span": (verb_start, span_end)
+                    })
+                    event_id_counter += 1
+            
+            events.extend(found_events)
+            current_pos = segment_start + len(segment)
+        
+        # 如果没有识别到事件，整个文本作为一个事件
+        if not events:
+            events.append({
+                "event_id": "E1",
+                "trigger": "implicit",
+                "span_text": text,
+                "span": (0, len(text))
+            })
+        
+        return events
+    
+    def _align_temporal_anchors(self, events: List[Dict[str, Any]], 
+                                   times: List[Dict[str, Any]], 
+                                   publish_date: str,
+                                   fact_type: str) -> List[Dict[str, Any]]:
+        """
+        时间-事件对齐（核心 Aligner）
+        
+        职责：将时间表达式对齐到事件，生成时间锚点
+        
+        对齐规则：
+        1. Duration → 转换为 valid_from/valid_to (基于 publish_date)
+        2. 其他时间 → 距离最小匹配（时间在事件后面优先）
+        3. 无时间 → 使用 publish_date 作为 fallback
+        
+        Returns:
+            时间锚点列表（每个事件对应1个锚点）
+        """
+        anchors = []
+        
+        # 处理 Duration
+        duration_times = [t for t in times if t['granularity'] == TimeGranularity.DURATION]
+        if duration_times:
+            # Duration 通常对应整个文本的事实（合同、签约等）
+            for dur_time in duration_times:
+                anchor = self._convert_duration_to_anchor(dur_time, publish_date)
+                if anchor:
+                    anchors.append(anchor)
+            return anchors
+        
+        # 对齐点时间到事件
+        point_times = [t for t in times if t['granularity'] != TimeGranularity.DURATION]
+        
+        if not point_times:
+            # 无时间表达，使用 publish_date 作为 fallback
+            anchors.append({
+                "event_date": None,
+                "valid_from": publish_date,
+                "valid_to": None,
+                "time_type": "FALLBACK",
+                "evidence": f"[无显式时间，使用发布日期: {publish_date}]"
+            })
+            return anchors
+        
+        # 为每个事件匹配最近的时间
+        for event in events:
+            event_pos = event['span'][0]  # 事件起始位置
+            
+            best_time = None
+            best_distance = float('inf')
+            
+            for time in point_times:
+                time_pos = time['span'][0]  # 时间表达起始位置
+                
+                # 计算距离（时间在事件后面优先）
+                if time_pos >= event_pos:
+                    # 时间在事件后面（自然语序）
+                    distance = time_pos - event_pos
+                else:
+                    # 时间在事件前面（提前出现）
+                    distance = event_pos - time_pos + 1000  # 加权惩罚
+                
+                if distance < best_distance:
+                    best_distance = distance
+                    best_time = time
+            
+            if best_time:
+                # 根据 fact_type 决定用 event_date 还是 valid_from
+                if fact_type == "EVENT":
+                    anchors.append({
+                        "event_date": best_time['normalized'],
+                        "valid_from": None,
+                        "valid_to": None,
+                        "time_type": "EXPLICIT",
+                        "evidence": best_time['evidence']
+                    })
+                else:  # STATE
+                    anchors.append({
+                        "event_date": None,
+                        "valid_from": best_time['normalized'],
+                        "valid_to": None,
+                        "time_type": "EXPLICIT",
+                        "evidence": best_time['evidence']
+                    })
+        
+        return anchors
+    
+    def _convert_duration_to_anchor(self, duration_expr: Dict[str, Any], 
+                                       anchor_date: str) -> Optional[Dict[str, Any]]:
+        """
+        将 Duration 转换为时间锚点
+        
+        Args:
+            duration_expr: Duration 时间表达
+            anchor_date: 锚定日期（通常是 publish_date - 5天）
+            
+        Returns:
+            时间锚点，包含 valid_from 和 valid_to
+        """
+        duration_text = duration_expr['normalized'].lower()
+        
+        # 解析年份数字
+        # 支持：four-and-a-half, five, 3, three
+        duration_map = {
+            'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
+            'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10
+        }
+        
+        # 尝试匹配数字
+        if duration_text.isdigit():
+            years = int(duration_text)
+        else:
+            # 尝试匹配文字数字
+            years = None
+            for word, num in duration_map.items():
+                if word in duration_text:
+                    years = num
+                    break
+            
+            # 处理 "four-and-a-half" 格式
+            if 'and-a-half' in duration_text or 'and a half' in duration_text:
+                if years:
+                    years += 0.5
+                elif 'four' in duration_text:
+                    years = 4.5
+        
+        if years is None:
+            return None
+        
+        # 计算起止日期
+        # anchor_date 通常是 publish_date - 5天
+        try:
+            if anchor_date:
+                start_date = datetime.strptime(anchor_date, "%Y-%m-%d") - timedelta(days=5)
+            else:
+                start_date = datetime.now()
+            
+            # 计算结束日期
+            end_date = start_date.replace(year=start_date.year + int(years))
+            # 加上剩余月份
+            months = int((years - int(years)) * 12)
+            if months > 0:
+                end_date = end_date + timedelta(days=months * 30)
+            
+            return {
+                "event_date": None,
+                "valid_from": start_date.strftime("%Y-%m-%d"),
+                "valid_to": end_date.strftime("%Y-%m-%d"),
+                "time_type": "DURATION",
+                "evidence": duration_expr["evidence"]
+            }
+        except:
+            return None
+    
