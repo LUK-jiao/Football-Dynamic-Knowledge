@@ -304,12 +304,12 @@ def main():
     "I think we had some big individual performances tonight. It's great for Gabriel Jesus tonight, after almost a year out, to start a game and make his 100th [Arsenal] appearance. The commitment within the group is incredible and I'm very happy for the boys."
     """
     
-    # test_pipeline(
-    #     raw_text=test_1_text,
-    #     source="Sky Sports",
-    #     publish_date="2025-01-15",
-    #     test_name="Arsenal EFL Cup Match"
-    # )
+    test_pipeline(
+        raw_text=test_1_text,
+        source="Sky Sports",
+        publish_date="2026-01-03",
+        test_name="Arsenal EFL Cup Match"
+    )
     
     # ========================================================================
     # 测试 2: 转会新闻
@@ -334,12 +334,12 @@ Identified as a key target by Head Coach Nuno Espírito Santo, the Hammers’ ne
 Everyone at West Ham United would like to welcome Taty and his family to East London, and wishes him every success for his career in Claret and Blue.
     """
     
-    test_pipeline(
-        raw_text=test_2_text,
-        source="West Ham United Official",
-        publish_date="2026-01-05",
-        test_name="Taty Castellanos Transfer"
-    )
+    # test_pipeline(
+    #     raw_text=test_2_text,
+    #     source="West Ham United Official",
+    #     publish_date="2026-01-05",
+    #     test_name="Taty Castellanos Transfer"
+    # )
     
     # ========================================================================
     # 测试 3: 伤病报告
