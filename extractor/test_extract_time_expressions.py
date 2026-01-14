@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-测试 _extract_time_expressions 函数
+测试 extract_time_expressions 函数
 
 覆盖所有时间粒度：
 - YEAR: 年份
@@ -15,7 +15,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from extractor.ner import FootballAnchorExtractor, TimeGranularity
+from extractor.time_expression_extractor import TimeExpressionExtractor, TimeGranularity
 
 
 def print_separator(char="=", length=80):
@@ -42,7 +42,7 @@ def test_year_extraction():
     print("测试组 1: 年份抽取 (YEAR)")
     print_separator("🏈", 80)
     
-    extractor = FootballAnchorExtractor()
+    extractor = TimeExpressionExtractor()
     
     test_cases = [
         "He won the trophy in 2021.",
@@ -54,7 +54,7 @@ def test_year_extraction():
     
     for i, text in enumerate(test_cases, 1):
         print(f"\n案例 {i}: \"{text}\"")
-        expressions = extractor._extract_time_expressions(text, "2026-01-10")
+        expressions = extractor.extract_time_expressions(text, "2026-01-10")
         print_time_expressions(expressions)
         
         # 验证
@@ -72,7 +72,7 @@ def test_month_extraction():
     print("测试组 2: 年月抽取 (MONTH)")
     print_separator("🏈", 80)
     
-    extractor = FootballAnchorExtractor()
+    extractor = TimeExpressionExtractor()
     
     test_cases = [
         "He joined in September 2025.",
@@ -82,7 +82,7 @@ def test_month_extraction():
     
     for i, text in enumerate(test_cases, 1):
         print(f"\n案例 {i}: \"{text}\"")
-        expressions = extractor._extract_time_expressions(text, "2026-01-10")
+        expressions = extractor.extract_time_expressions(text, "2026-01-10")
         print_time_expressions(expressions)
         
         # 验证
@@ -100,7 +100,7 @@ def test_day_extraction():
     print("测试组 3: 完整日期抽取 (DAY)")
     print_separator("🏈", 80)
     
-    extractor = FootballAnchorExtractor()
+    extractor = TimeExpressionExtractor()
     
     test_cases = [
         ("1 September 2025", "DMY 格式"),
@@ -113,7 +113,7 @@ def test_day_extraction():
     for i, (text, desc) in enumerate(test_cases, 1):
         print(f"\n案例 {i}: {desc}")
         print(f"文本: \"{text}\"")
-        expressions = extractor._extract_time_expressions(text, "2026-01-10")
+        expressions = extractor.extract_time_expressions(text, "2026-01-10")
         print_time_expressions(expressions)
         
         # 验证
@@ -131,7 +131,7 @@ def test_duration_extraction():
     print("测试组 4: 时间段抽取 (DURATION)")
     print_separator("🏈", 80)
     
-    extractor = FootballAnchorExtractor()
+    extractor = TimeExpressionExtractor()
     
     test_cases = [
         ("Signed a four-and-a-half year contract.", "小数年份"),
@@ -145,7 +145,7 @@ def test_duration_extraction():
     for i, (text, desc) in enumerate(test_cases, 1):
         print(f"\n案例 {i}: {desc}")
         print(f"文本: \"{text}\"")
-        expressions = extractor._extract_time_expressions(text, "2026-01-10")
+        expressions = extractor.extract_time_expressions(text, "2026-01-10")
         print_time_expressions(expressions)
         
         # 验证
@@ -164,7 +164,7 @@ def test_relative_extraction():
     print("测试组 5: 相对时间抽取 (RELATIVE)")
     print_separator("🏈", 80)
     
-    extractor = FootballAnchorExtractor()
+    extractor = TimeExpressionExtractor()
     
     test_cases = [
         ("He joined last year.", "方向型 - last year"),
@@ -189,7 +189,7 @@ def test_relative_extraction():
     for i, (text, desc) in enumerate(test_cases, 1):
         print(f"\n案例 {i}: {desc}")
         print(f"文本: \"{text}\"")
-        expressions = extractor._extract_time_expressions(text, "2026-01-10")
+        expressions = extractor.extract_time_expressions(text, "2026-01-10")
         print_time_expressions(expressions)
         
         # 验证
@@ -208,7 +208,7 @@ def test_mixed_extraction():
     print("测试组 6: 混合时间表达式")
     print_separator("🏈", 80)
     
-    extractor = FootballAnchorExtractor()
+    extractor = TimeExpressionExtractor()
     
     test_cases = [
         {
@@ -240,7 +240,7 @@ def test_mixed_extraction():
     for i, case in enumerate(test_cases, 1):
         print(f"\n案例 {i}: {case['desc']}")
         print(f"文本: \"{case['text']}\"")
-        expressions = extractor._extract_time_expressions(case['text'], "2026-01-10")
+        expressions = extractor.extract_time_expressions(case['text'], "2026-01-10")
         print_time_expressions(expressions)
         
         # 验证数量
@@ -265,7 +265,7 @@ def test_edge_cases():
     print("测试组 7: 边界情况")
     print_separator("🏈", 80)
     
-    extractor = FootballAnchorExtractor()
+    extractor = TimeExpressionExtractor()
     
     test_cases = [
         # {
@@ -293,7 +293,7 @@ def test_edge_cases():
     for i, case in enumerate(test_cases, 1):
         print(f"\n案例 {i}: {case['desc']}")
         print(f"文本: \"{case['text']}\"")
-        expressions = extractor._extract_time_expressions(case['text'], "2026-01-10")
+        expressions = extractor.extract_time_expressions(case['text'], "2026-01-10")
         print_time_expressions(expressions)
         
         # 验证
@@ -311,7 +311,7 @@ def test_span_deduplication():
     print("测试组 8: Span 去重机制")
     print_separator("🏈", 80)
     
-    extractor = FootballAnchorExtractor()
+    extractor = TimeExpressionExtractor()
     
     print("\n说明: 现在使用 span (start, end) 进行去重，而不是 evidence 文本")
     
@@ -332,7 +332,7 @@ def test_span_deduplication():
         print(f"\n案例 {i}: {case['desc']}")
         print(f"文本: \"{case['text']}\"")
         print(f"备注: {case['note']}")
-        expressions = extractor._extract_time_expressions(case['text'], "2026-01-10")
+        expressions = extractor.extract_time_expressions(case['text'], "2026-01-10")
         print_time_expressions(expressions)
         
         # 检查 span 是否有重叠
@@ -358,12 +358,12 @@ def test_output_schema():
     print("测试组 9: 输出结构验证")
     print_separator("🏈", 80)
     
-    extractor = FootballAnchorExtractor()
+    extractor = TimeExpressionExtractor()
     
     text = "He joined last year and signed a 5-year contract on 1 January 2026."
     print(f"\n测试文本: \"{text}\"")
     
-    expressions = extractor._extract_time_expressions(text, "2026-01-10")
+    expressions = extractor.extract_time_expressions(text, "2026-01-10")
     print_time_expressions(expressions)
     
     print("\n结构验证:")
@@ -423,7 +423,7 @@ def test_real_data_from_json():
     with open(json_path, 'r', encoding='utf-8') as f:
         blocks = json.load(f)
     
-    extractor = FootballAnchorExtractor()
+    extractor = TimeExpressionExtractor()
     
     print(f"\n总共 {len(blocks)} 个块需要测试\n")
     
@@ -441,7 +441,7 @@ def test_real_data_from_json():
         print(f"\n📅 发布日期: {publish_date}")
         
         # 提取时间表达式
-        time_expressions = extractor._extract_time_expressions(text, publish_date)
+        time_expressions = extractor.extract_time_expressions(text, publish_date)
         
         print(f"\n⏰ 提取到的时间表达式 ({len(time_expressions)} 个):")
         if time_expressions:

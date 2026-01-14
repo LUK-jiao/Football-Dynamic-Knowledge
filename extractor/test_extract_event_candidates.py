@@ -21,7 +21,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from extractor.ner import FootballAnchorExtractor
+from extractor.event_candidate_extractor import EventCandidateExtractor
 
 
 def test_single_event_extraction():
@@ -30,7 +30,7 @@ def test_single_event_extraction():
     print("测试1: 单个事件提取")
     print("=" * 80)
     
-    extractor = FootballAnchorExtractor()
+    extractor = EventCandidateExtractor()
     
     test_cases = [
         ("Arsenal won the match.", 1, "won"),
@@ -41,7 +41,7 @@ def test_single_event_extraction():
     ]
     
     for text, expected_count, expected_trigger in test_cases:
-        result = extractor._extract_event_candidates(text)
+        result = extractor.extract_event_candidates(text)
         status = "✅" if len(result) == expected_count else "❌"
         print(f"{status} '{text}'")
         print(f"   预期: {expected_count} 个事件, trigger='{expected_trigger}'")
@@ -61,7 +61,7 @@ def test_multiple_events_extraction():
     print("测试2: 多个事件提取（不同动词）")
     print("=" * 80)
     
-    extractor = FootballAnchorExtractor()
+    extractor = EventCandidateExtractor()
     
     test_cases = [
         ("Arsenal won the match. Messi scored a goal.", 2),
@@ -70,7 +70,7 @@ def test_multiple_events_extraction():
     ]
     
     for text, expected_count in test_cases:
-        result = extractor._extract_event_candidates(text)
+        result = extractor.extract_event_candidates(text)
         status = "✅" if len(result) == expected_count else "❌"
         print(f"{status} '{text}'")
         print(f"   预期: {expected_count} 个事件")
@@ -89,7 +89,7 @@ def test_parallel_events_extraction():
     print("测试3: 并列事件提取（and连接）")
     print("=" * 80)
     
-    extractor = FootballAnchorExtractor()
+    extractor = EventCandidateExtractor()
     
     test_cases = [
         ("He signed a contract and joined the team.", 2, ["signed", "joined"]),
@@ -98,7 +98,7 @@ def test_parallel_events_extraction():
     ]
     
     for text, expected_count, expected_triggers in test_cases:
-        result = extractor._extract_event_candidates(text)
+        result = extractor.extract_event_candidates(text)
         actual_triggers = [e['trigger'] for e in result]
         status = "✅" if len(result) == expected_count and all(t in actual_triggers for t in expected_triggers) else "❌"
         
@@ -119,7 +119,7 @@ def test_different_verb_tenses():
     print("测试4: 不同时态动词（过去时、动名词、完成时、状态）")
     print("=" * 80)
     
-    extractor = FootballAnchorExtractor()
+    extractor = EventCandidateExtractor()
     
     test_cases = [
         # 过去时
@@ -138,7 +138,7 @@ def test_different_verb_tenses():
     ]
     
     for text, expected_count, verb_type, expected_trigger in test_cases:
-        result = extractor._extract_event_candidates(text)
+        result = extractor.extract_event_candidates(text)
         status = "✅" if len(result) == expected_count else "❌"
         
         print(f"{status} '{text}' (类型: {verb_type})")
@@ -162,7 +162,7 @@ def test_connector_segmentation():
     print("测试5: 连接词分段（基于依存句法分析）")
     print("=" * 80)
     
-    extractor = FootballAnchorExtractor()
+    extractor = EventCandidateExtractor()
     
     # 更新预期结果：基于依存句法，每个句子通常只提取一个主要事件
     test_cases = [
@@ -174,7 +174,7 @@ def test_connector_segmentation():
     ]
     
     for text, expected_count, expected_triggers in test_cases:
-        result = extractor._extract_event_candidates(text)
+        result = extractor.extract_event_candidates(text)
         actual_triggers = [e['trigger'] for e in result]
         status = "✅" if len(result) == expected_count and all(t in actual_triggers for t in expected_triggers) else "❌"
         
@@ -195,7 +195,7 @@ def test_edge_cases():
     print("测试6: 边界情况")
     print("=" * 80)
     
-    extractor = FootballAnchorExtractor()
+    extractor = EventCandidateExtractor()
     
     test_cases = [
         # 空文本
@@ -212,7 +212,7 @@ def test_edge_cases():
     ]
     
     for text, expected_count, expected_trigger in test_cases:
-        result = extractor._extract_event_candidates(text)
+        result = extractor.extract_event_candidates(text)
         
         if expected_count is not None:
             status = "✅" if len(result) == expected_count else "❌"
@@ -236,9 +236,9 @@ def test_output_schema():
     print("测试7: 输出结构验证")
     print("=" * 80)
     
-    extractor = FootballAnchorExtractor()
+    extractor = EventCandidateExtractor()
     text = "Arsenal won the match."
-    result = extractor._extract_event_candidates(text)
+    result = extractor.extract_event_candidates(text)
     
     print(f"文本: '{text}'")
     print(f"返回结果: {len(result)} 个事件\n")
@@ -282,7 +282,7 @@ def test_real_data():
     print("测试8: 真实数据测试")
     print("=" * 80)
     
-    extractor = FootballAnchorExtractor()
+    extractor = EventCandidateExtractor()
     
     real_texts = [
         # 转会新闻
@@ -302,7 +302,7 @@ def test_real_data():
         print(f"\n真实案例 {i}:")
         print(f"文本: {text}\n")
         
-        result = extractor._extract_event_candidates(text)
+        result = extractor.extract_event_candidates(text)
         
         print(f"⏰ 提取到的事件 ({len(result)} 个):")
         if result:
@@ -324,13 +324,13 @@ def test_complex_scenarios():
     print("测试9: 复杂场景")
     print("=" * 80)
     
-    extractor = FootballAnchorExtractor()
+    extractor = EventCandidateExtractor()
     
     # 复杂场景1: 多层嵌套
     text1 = "After he signed with Arsenal in 2020, before he joined Barcelona in 2023, he played for Lyon."
     print(f"场景1: 多层嵌套时间关系")
     print(f"文本: {text1}\n")
-    result1 = extractor._extract_event_candidates(text1)
+    result1 = extractor.extract_event_candidates(text1)
     print(f"提取到 {len(result1)} 个事件:")
     for event in result1:
         print(f"  [{event['event_id']}] {event['trigger']}: {event['span_text']}")
@@ -340,7 +340,7 @@ def test_complex_scenarios():
     text2 = "He signed, joined, and played for the club."
     print(f"场景2: 多个并列事件")
     print(f"文本: {text2}\n")
-    result2 = extractor._extract_event_candidates(text2)
+    result2 = extractor.extract_event_candidates(text2)
     print(f"提取到 {len(result2)} 个事件:")
     for event in result2:
         print(f"  [{event['event_id']}] {event['trigger']}: {event['span_text']}")
@@ -354,7 +354,7 @@ def test_complex_scenarios():
     """
     print(f"场景3: 长文本多事件")
     print(f"文本: {text3.strip()[:100]}...\n")
-    result3 = extractor._extract_event_candidates(text3)
+    result3 = extractor.extract_event_candidates(text3)
     print(f"提取到 {len(result3)} 个事件:")
     for event in result3:
         print(f"  [{event['event_id']}] {event['trigger']}: {event['span_text'][:50]}...")
@@ -373,7 +373,7 @@ def test_real_data_from_json():
     with open(json_path, 'r', encoding='utf-8') as f:
         blocks = json.load(f)
     
-    extractor = FootballAnchorExtractor()
+    extractor = EventCandidateExtractor()
     
     print(f"\n总共 {len(blocks)} 个块需要测试\n")
     
@@ -391,7 +391,7 @@ def test_real_data_from_json():
         print(f"\n📅 发布日期: {publish_date}")
         
         # 提取候选事件
-        event_candidates = extractor._extract_event_candidates(text)
+        event_candidates = extractor.extract_event_candidates(text)
         
         print(f"\n⏰ 提取到的候选事件 ({len(event_candidates)} 个):")
         for event in event_candidates:
