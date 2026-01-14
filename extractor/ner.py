@@ -14,6 +14,7 @@ import json
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from enum import Enum
+import spacy
 
 
 class EntityType(str, Enum):
@@ -74,6 +75,15 @@ class FootballAnchorExtractor:
             llm_backend: 可选的LLM后端，用于智能实体识别
         """
         self.llm_backend = llm_backend
+        
+        # 加载 spaCy 英文模型（用于事件候选生成）
+        try:
+            self.nlp = spacy.load("en_core_web_sm")
+        except OSError:
+            # 如果模型未安装，提示用户安装
+            raise RuntimeError(
+                "spaCy 英文模型未安装。请运行: python -m spacy download en_core_web_sm"
+            )
         
         # 知名足球俱乐部列表 #todo 还要加上球员和教练的名单
         self.known_clubs = { #todo 拓展一下俱乐部，起码全部英超俱乐部要有，并且还需要转换一下昵称，比如曼城->City，曼联->Utd，阿森纳->Gunners
@@ -933,99 +943,230 @@ class FootballAnchorExtractor:
     
     def _extract_event_candidates(self, text: str) -> List[Dict[str, Any]]:
         """
-        提取事件候选（新增）
+        提取事件候选（基于 spaCy 依存句法分析）
         
-        职责：识别文本中的所有潜在事件，包括并列事件
+        架构原则：
+        - 高召回、结构受控的事件候选生成
+        - 不使用正则、不使用动词白名单
+        - 事件边界基于句法结构（dependency subtree）
+        - 在生成阶段就完成去重，不允许生成后再做去噪
+        
+        Trigger 选择规则（三类）：
+        1. 动词事件：token.pos_ == VERB AND token.dep_ NOT IN {"aux", "auxpass"}
+        2. 形容词事件：token.pos_ == ADJ AND (存在 xcomp 或 prep 子节点)
+        3. 名词事件：token.pos_ == NOUN AND (存在 prep 或 of-结构)
+        
+        Span 构建方式：
+        - 使用 trigger token 的 dependency subtree（最小闭包）
+        - span 起点 = subtree 中最小 token.idx
+        - span 终点 = subtree 中最大 token.idx + len(token)
+        - span_text 直接来自原始文本切片
+        
+        重复控制（生成期内完成）：
+        - 若两个事件的 span 完全相同，仅保留一个
+        - 若一个事件的 span 完全包含于另一个，保留依存树深度更大的
         
         Returns:
             [{
                 "event_id": "E1",
-                "trigger": "won",
-                "span_text": "won the MLS Cup",
+                "trigger": "...",
+                "span_text": "...",
                 "span": (start, end)
             }, ...]
         """
+        # 使用 spaCy 解析文本
+        doc = self.nlp(text)
+        
         events = []
         event_id_counter = 1
+        seen_events = {}  # {span: (trigger, depth, event_dict)}
         
-        # 先按连接词切分文本（before, after, since, until, when）
-        split_pattern = r'\s+(before|after|since|until|when)\s+'
-        segments = re.split(split_pattern, text, flags=re.IGNORECASE)
+        # 辅助函数：计算 token 在依存树中的深度
+        def _get_depth(token):
+            """计算 token 在依存树中的深度（root=0）"""
+            depth = 0
+            current = token
+            while current.head != current:
+                depth += 1
+                current = current.head
+            return depth
         
-        current_pos = 0
-        for i, segment in enumerate(segments):
-            # 跳过连接词本身
-            if i % 2 == 1 and segment.lower() in ['before', 'after', 'since', 'until', 'when']:
-                current_pos += len(segment) + 2  # +2 for spaces
+        # 辅助函数：从 subtree 提取 span
+        def _get_span_from_subtree(token):
+            """从 token 的 subtree 提取 span"""
+            subtree_tokens = list(token.subtree)
+            if not subtree_tokens:
+                return None
+            
+            # 特殊处理：对于 xcomp 关系的动词，排除 "to" 标记
+            if token.dep_ == "xcomp" and token.pos_ == "VERB":
+                subtree_tokens = [t for t in subtree_tokens if not (t.dep_ == "aux" and t.text.lower() == "to")]
+            
+            if not subtree_tokens:
+                return None
+            
+            # 计算 span 起点和终点
+            start_idx = min(t.idx for t in subtree_tokens)
+            end_idx = max(t.idx + len(t.text) for t in subtree_tokens)
+            
+            # 从原始文本提取 span_text
+            span_text = text[start_idx:end_idx].strip()
+            span = (start_idx, end_idx)
+            
+            return span, span_text
+        
+        # 辅助函数：检查是否有特定依存关系的子节点
+        def _has_child_with_dep(token, dep_labels):
+            """检查 token 是否有指定依存标签的子节点"""
+            for child in token.children:
+                if child.dep_ in dep_labels:
+                    return True
+            return False
+        
+        # 辅助函数：检查是否有 prep 子节点，且 prep 为 "of"
+        def _has_of_prep(token):
+            """检查是否有 of-结构"""
+            for child in token.children:
+                if child.dep_ == "prep" and child.text.lower() == "of":
+                    return True
+            return False
+        
+        # 遍历所有 token，识别 trigger
+        for token in doc:
+            trigger_text = token.text
+            trigger_valid = False
+            trigger_type = None
+            
+            # 规则1: 动词事件（主要来源）
+            if token.pos_ == "VERB" and token.dep_ not in {"aux", "auxpass"}:
+                trigger_valid = True
+                trigger_type = "VERB"
+            
+            # 规则2: 形容词事件（受限）
+            elif token.pos_ == "ADJ":
+                # 检查是否有 xcomp 或 prep 子节点
+                has_xcomp = _has_child_with_dep(token, {"xcomp"})
+                has_prep = _has_child_with_dep(token, {"prep"})
+                
+                if has_xcomp or has_prep:
+                    # 特殊规则：如果 xcomp 子节点是动词，则不将形容词作为触发点
+                    # （因为动词事件会单独提取，形容词只是引导作用）
+                    if has_xcomp:
+                        xcomp_is_verb = any(child.pos_ == "VERB" for child in token.children if child.dep_ == "xcomp")
+                        if xcomp_is_verb:
+                            continue  # 跳过此形容词，让动词自己作为触发点
+                    
+                    trigger_valid = True
+                    trigger_type = "ADJ"
+            
+            # 规则3: 名词事件（受限）
+            elif token.pos_ == "NOUN":
+                if _has_child_with_dep(token, {"prep"}) or _has_of_prep(token):
+                    trigger_valid = True
+                    trigger_type = "NOUN"
+            
+            # 如果不是有效 trigger，跳过
+            if not trigger_valid:
                 continue
             
-            if not segment.strip():
+            # 从 subtree 提取 span
+            result = _get_span_from_subtree(token)
+            if not result:
                 continue
             
-            segment_start = current_pos
+            span, span_text = result
             
-            # 动词模式（过去时、动名词、完成时、现在时）
-            verb_patterns = [
-                (r'\b(won|scored|joined|signed|agreed|completed|announced|played|left|arrived)\b', 'past'),
-                (r'\b(winning|scoring|joining|signing|agreeing|completing|announcing|playing|leaving|arriving)\b', 'gerund'),
-                (r'\b(?:has|have)\s+(signed|joined|agreed|scored|won|completed)\b', 'perfect'),
-                (r'\b(is|are|was|were|remains|serves)\b\s+(?:the\s+)?(?:head\s+)?(?:coach|player|under\s+contract)', 'state'),
-            ]
-            
-            found_events = []
-            for pattern, verb_type in verb_patterns:
-                for match in re.finditer(pattern, segment, re.IGNORECASE):
-                    verb = match.group(1)
-                    verb_start = segment_start + match.start()
-                    
-                    # 提取事件 span（动词 + 后续内容，直到句号或连接词）
-                    remaining_text = text[verb_start:]
-                    span_end_match = re.search(r'[.;]|\s+(and|before|after|since|until|when)\s+', remaining_text)
-                    if span_end_match:
-                        span_end = verb_start + span_end_match.start()
-                    else:
-                        span_end = min(verb_start + 100, len(text))
-                    
-                    span_text = text[verb_start:span_end].strip()
-                    
-                    # 避免重复
-                    if not any(e['span'] == (verb_start, span_end) for e in found_events):
-                        found_events.append({
-                            "event_id": f"E{event_id_counter}",
-                            "trigger": verb,
-                            "span_text": span_text,
-                            "span": (verb_start, span_end)
-                        })
-                        event_id_counter += 1
-            
-            # 处理并列事件（"and" 连接的多个动词）
-            and_pattern = r'\band\s+(won|scored|joined|signed|agreed|completed|played)\b'
-            for match in re.finditer(and_pattern, segment, re.IGNORECASE):
-                verb = match.group(1)
-                verb_start = segment_start + match.start() + len('and ')
+            # 去重和重叠控制
+            if span in seen_events:
+                # 如果 span 完全相同，保留依存树层次更高的（depth 更小，更接近 ROOT）
+                existing_trigger, existing_depth, existing_event = seen_events[span]
+                current_depth = _get_depth(token)
                 
-                remaining_text = text[verb_start:]
-                span_end_match = re.search(r'[.;]|\s+(and|before|after|since|until)\s+', remaining_text)
-                if span_end_match:
-                    span_end = verb_start + span_end_match.start()
-                else:
-                    span_end = min(verb_start + 80, len(text))
-                
-                span_text = text[verb_start:span_end].strip()
-                
-                if not any(e['span'] == (verb_start, span_end) for e in found_events):
-                    found_events.append({
-                        "event_id": f"E{event_id_counter}",
-                        "trigger": verb,
+                if current_depth < existing_depth:
+                    # 当前事件层次更高，替换
+                    seen_events[span] = (trigger_text, current_depth, {
+                        "event_id": existing_event["event_id"],  # 保持原 ID
+                        "trigger": trigger_text,
                         "span_text": span_text,
-                        "span": (verb_start, span_end)
+                        "span": span
                     })
+            else:
+                # 检查是否被其他事件完全包含，或包含其他事件
+                is_contained = False
+                spans_to_remove = []
+                
+                for existing_span in list(seen_events.keys()):
+                    # 如果当前 span 被包含在已有 span 中
+                    if existing_span[0] <= span[0] and span[1] <= existing_span[1] and span != existing_span:
+                        existing_trigger, existing_depth, existing_event = seen_events[existing_span]
+                        current_depth = _get_depth(token)
+                        
+                        # 特殊规则：并列结构（conj）始终保留，不被包含关系过滤
+                        if token.dep_ == "conj":
+                            # 并列事件，不检查包含关系
+                            break
+                        
+                        if current_depth < existing_depth:
+                            # 当前事件层次更高，删除已有事件，添加当前事件
+                            spans_to_remove.append(existing_span)
+                        else:
+                            # 已有事件层次更高，跳过当前事件
+                            is_contained = True
+                            break
+                    
+                    # 如果当前 span 包含已有 span
+                    elif span[0] <= existing_span[0] and existing_span[1] <= span[1] and span != existing_span:
+                        existing_trigger, existing_depth, existing_event = seen_events[existing_span]
+                        current_depth = _get_depth(token)
+                        
+                        # 检查已有事件是否为并列结构
+                        # 需要找到对应的 token（通过 span 位置）
+                        existing_token = None
+                        for t in doc:
+                            t_start = min(st.idx for st in t.subtree)
+                            t_end = max(st.idx + len(st.text) for st in t.subtree)
+                            if (t_start, t_end) == existing_span:
+                                existing_token = t
+                                break
+                        
+                        # 如果已有事件是并列结构，保留它
+                        if existing_token and existing_token.dep_ == "conj":
+                            continue
+                        
+                        if current_depth < existing_depth:
+                            # 当前事件层次更高，删除已有事件
+                            spans_to_remove.append(existing_span)
+                        else:
+                            # 已有事件层次更高，跳过当前事件
+                            is_contained = True
+                            break
+                
+                # 删除需要移除的 spans
+                for span_to_remove in spans_to_remove:
+                    del seen_events[span_to_remove]
+                
+                if not is_contained:
+                    # 添加新事件
+                    event = {
+                        "event_id": f"E{event_id_counter}",
+                        "trigger": trigger_text,
+                        "span_text": span_text,
+                        "span": span
+                    }
+                    seen_events[span] = (trigger_text, _get_depth(token), event)
                     event_id_counter += 1
-            
-            events.extend(found_events)
-            current_pos = segment_start + len(segment)
         
-        # 如果没有识别到事件，整个文本作为一个事件
+        # 从 seen_events 提取最终事件列表
+        events = [event for _, _, event in seen_events.values()]
+        
+        # 按 span 起点排序
+        events.sort(key=lambda e: e["span"][0])
+        
+        # 重新分配 event_id（保证连续）
+        for i, event in enumerate(events, 1):
+            event["event_id"] = f"E{i}"
+        
+        # 如果没有识别到事件，整个文本作为一个隐式事件
         if not events:
             events.append({
                 "event_id": "E1",
