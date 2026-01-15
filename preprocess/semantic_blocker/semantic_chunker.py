@@ -85,10 +85,12 @@ class ScoringResult:
 
 
 @dataclass
+@dataclass
 class Chunk:
     """A semantic chunk with metadata."""
     sentences: List[str]
     chunk_id: int
+    chunk_type: str = "normal"  # Type of chunk: "normal", "single", "quote", etc.
     scores: List[float] = None  # LLM scores for each sentence (except first)
     
     def __post_init__(self):
@@ -399,11 +401,32 @@ class SemanticChunker:
         """
         chunks = []
         for i, sentences in enumerate(raw_chunks, 1):
+            chunk_type = self._infer_chunk_type(sentences)
             chunks.append(Chunk(
                 sentences=sentences,
-                chunk_id=i
+                chunk_id=i,
+                chunk_type=chunk_type
             ))
         return chunks
+    
+    def _infer_chunk_type(self, sentences: List[str]) -> str:
+        """
+        Heuristically infer chunk type.
+        """
+        text = " ".join(sentences)
+        
+        if re.search(r'(said|told|stated|commented)', text):
+            return "quotes"
+        if any(marker in text for marker in ["Overall", "This was", "Statistics"]):
+            return "statistics"
+        if any(marker in text for marker in ["will face", "semi-final", "next round"]):
+            return "future_fixture"
+        if re.search(r'penalty|penalties|shoot-?out', text, re.IGNORECASE):
+            return "penalty_shootout"
+        if re.search(r'scored?|goal', text, re.IGNORECASE):
+            return "goal_sequence"
+        
+        return "match_narrative"
     
     def get_stats(self) -> Dict:
         """Get chunking statistics."""

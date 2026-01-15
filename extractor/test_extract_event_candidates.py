@@ -369,7 +369,7 @@ def test_real_data_from_json():
     print("测试：使用 Arsenal EFL Cup 真实数据")
     
     # 读取 JSON 文件
-    json_path = "extractor/output/arsenal_efl_cup_match_20260114_112335.json"
+    json_path = "extractor/output/taty_castellanos_transfer_20260114_102839.json"
     with open(json_path, 'r', encoding='utf-8') as f:
         blocks = json.load(f)
     
@@ -395,7 +395,7 @@ def test_real_data_from_json():
         
         print(f"\n⏰ 提取到的候选事件 ({len(event_candidates)} 个):")
         for event in event_candidates:
-            print(f"  [{event['event_id']}] {event['trigger']}: {event['span_text'][:50]}...")
+            print(f"  [{event['event_id']}] {event['trigger']}: {event['span_text']}")
         print()
     
     print(f"{'='*80}")
