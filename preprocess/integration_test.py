@@ -58,9 +58,9 @@ def test_full_pipeline():
     splitter = SentenceSplitter(min_length=10)
     sentences = splitter.split(text_1)
     
-    print(f"  ✓ Split into {len(sentences)} sentences:")
-    for i, sent in enumerate(sentences, 1):
-        print(f"    {i}. {sent}")
+    # print(f"  ✓ Split into {len(sentences)} sentences:")
+    # for i, sent in enumerate(sentences, 1):
+    #     print(f"    {i}. {sent}")
     
     # Step 2: Semantic chunking with v2 system
     print("\n[Step 2] Semantic Chunking with Ollama v2 (Continuous Scoring)...")
@@ -81,10 +81,8 @@ def test_full_pipeline():
     
     print(f"  ✓ Created {len(chunks)} semantic chunks:")
     for chunk in chunks:
-        print(f"\n    Chunk {chunk.chunk_id} ({len(chunk)} sentences) - Type: {chunk.chunk_type}")
-        for sent in chunk.sentences:
-            preview = sent[:80] + "..." if len(sent) > 80 else sent
-            print(f"      • {preview}")
+        preview = ' '.join(chunk.sentences)
+        print(f"\n    Chunk {chunk.chunk_id} ({chunk.chunk_type}): {preview}")
     
     # ========================================================================
     # Test Case 2: Transfer News & Injury Update
@@ -126,7 +124,7 @@ Everyone at West Ham United would like to welcome Taty and his family to East Lo
     print(f"  ✓ Created {len(chunks_2)} semantic chunks:")
     
     for chunk in chunks_2:
-        preview = ' '.join(chunk.sentences)[:100] + "..."
+        preview = ' '.join(chunk.sentences)
         print(f"\n    Chunk {chunk.chunk_id} ({chunk.chunk_type}): {preview}")
     
     # ========================================================================
