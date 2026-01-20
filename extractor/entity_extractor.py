@@ -58,71 +58,315 @@ class EntityExtractor:
         self._init_syntax_patterns()
     
     def _init_dictionaries(self):
-        """初始化词典（Layer 2）"""
+        """
+        初始化词典（Layer 2）
         
-        # Person Dictionary: name → possible roles
-        self.person_dict = {
-            "Mikel Arteta": ["coach", "former_player"],
-            "Pep Guardiola": ["coach"],
-            "Kepa Arrizabalaga": ["player"],
-            "Harry Kane": ["player"],
-            "Mohamed Salah": ["player"],
-            "Erling Haaland": ["player"],
-            "Carlo Ancelotti": ["coach"],
-            "Jürgen Klopp": ["coach"],
-            "Mauricio Pochettino": ["coach"],
+        每个词典条目包含：
+        - canonical: 规范名称
+        - aliases: 别名列表
+        - id: 稳定的实体ID
+        - type: 实体类型
+        """
+        
+        # Player Dictionary
+        self.player_dict = {
+            "Kepa Arrizabalaga": {
+                "canonical": "Kepa Arrizabalaga",
+                "aliases": ["Kepa"],
+                "id": "player_kepa_arrizabalaga",
+                "type": EntityType.PLAYER
+            },
+            "Maxence Lacroix": {
+                "canonical": "Maxence Lacroix",
+                "aliases": ["Lacroix"],
+                "id": "player_maxence_lacroix",
+                "type": EntityType.PLAYER
+            },
+            "Harry Kane": {
+                "canonical": "Harry Kane",
+                "aliases": ["Kane"],
+                "id": "player_harry_kane",
+                "type": EntityType.PLAYER
+            },
+            "Mohamed Salah": {
+                "canonical": "Mohamed Salah",
+                "aliases": ["Salah", "Mo Salah"],
+                "id": "player_mohamed_salah",
+                "type": EntityType.PLAYER
+            },
+            "Erling Haaland": {
+                "canonical": "Erling Haaland",
+                "aliases": ["Haaland"],
+                "id": "player_erling_haaland",
+                "type": EntityType.PLAYER
+            },
+            "Bukayo Saka": {
+                "canonical": "Bukayo Saka",
+                "aliases": ["Saka"],
+                "id": "player_bukayo_saka",
+                "type": EntityType.PLAYER
+            },
+            "Gabriel Jesus": {
+                "canonical": "Gabriel Jesus",
+                "aliases": ["Jesus"],
+                "id": "player_gabriel_jesus",
+                "type": EntityType.PLAYER
+            },
         }
         
-        # Club Dictionary: name → metadata
+        # Coach Dictionary
+        self.coach_dict = {
+            "Mikel Arteta": {
+                "canonical": "Mikel Arteta",
+                "aliases": ["Arteta"],
+                "id": "coach_mikel_arteta",
+                "type": EntityType.COACH
+            },
+            "Pep Guardiola": {
+                "canonical": "Pep Guardiola",
+                "aliases": ["Guardiola"],
+                "id": "coach_pep_guardiola",
+                "type": EntityType.COACH
+            },
+            "Carlo Ancelotti": {
+                "canonical": "Carlo Ancelotti",
+                "aliases": ["Ancelotti"],
+                "id": "coach_carlo_ancelotti",
+                "type": EntityType.COACH
+            },
+            "Jürgen Klopp": {
+                "canonical": "Jürgen Klopp",
+                "aliases": ["Klopp", "Jurgen Klopp"],
+                "id": "coach_jurgen_klopp",
+                "type": EntityType.COACH
+            },
+            "Mauricio Pochettino": {
+                "canonical": "Mauricio Pochettino",
+                "aliases": ["Pochettino"],
+                "id": "coach_mauricio_pochettino",
+                "type": EntityType.COACH
+            },
+        }
+        
+        # Club Dictionary
         self.club_dict = {
-            "Arsenal": {"type": "Club", "aliases": ["Gunners", "the Gunners"]},
-            "Manchester United": {"type": "Club", "aliases": ["Man Utd", "United"]},
-            "Manchester City": {"type": "Club", "aliases": ["Man City", "City"]},
-            "Chelsea": {"type": "Club", "aliases": ["the Blues"]},
-            "Liverpool": {"type": "Club", "aliases": ["the Reds"]},
-            "Tottenham": {"type": "Club", "aliases": ["Spurs"]},
-            "Bayern Munich": {"type": "Club", "aliases": []},
-            "Real Madrid": {"type": "Club", "aliases": []},
-            "Barcelona": {"type": "Club", "aliases": ["Barça"]},
-            "Paris Saint-Germain": {"type": "Club", "aliases": ["PSG"]},
-            "PSG": {"type": "Club", "aliases": []},
-            "Juventus": {"type": "Club", "aliases": ["Juve"]},
-            "AC Milan": {"type": "Club", "aliases": []},
-            "Inter Milan": {"type": "Club", "aliases": ["Inter"]},
-            "Borussia Dortmund": {"type": "Club", "aliases": ["Dortmund"]},
-            "Ajax": {"type": "Club", "aliases": []},
-            "Porto": {"type": "Club", "aliases": []},
-            "Benfica": {"type": "Club", "aliases": []},
-            "Crystal Palace": {"type": "Club", "aliases": ["Palace"]},
-            "West Ham United": {"type": "Club", "aliases": ["West Ham", "the Hammers"]},
-            "Lazio": {"type": "Club", "aliases": []},
-            "New York City FC": {"type": "Club", "aliases": ["NYCFC"]},
+            "Arsenal": {
+                "canonical": "Arsenal",
+                "aliases": ["Gunners", "the Gunners", "Arsenal FC"],
+                "id": "club_arsenal",
+                "type": EntityType.CLUB
+            },
+            "Manchester United": {
+                "canonical": "Manchester United",
+                "aliases": ["Man Utd", "United", "Man United", "MUFC"],
+                "id": "club_manchester_united",
+                "type": EntityType.CLUB
+            },
+            "Manchester City": {
+                "canonical": "Manchester City",
+                "aliases": ["Man City", "City", "MCFC"],
+                "id": "club_manchester_city",
+                "type": EntityType.CLUB
+            },
+            "Chelsea": {
+                "canonical": "Chelsea",
+                "aliases": ["the Blues", "Chelsea FC"],
+                "id": "club_chelsea",
+                "type": EntityType.CLUB
+            },
+            "Liverpool": {
+                "canonical": "Liverpool",
+                "aliases": ["the Reds", "Liverpool FC", "LFC"],
+                "id": "club_liverpool",
+                "type": EntityType.CLUB
+            },
+            "Tottenham Hotspur": {
+                "canonical": "Tottenham Hotspur",
+                "aliases": ["Spurs", "Tottenham", "Hotspur"],
+                "id": "club_tottenham",
+                "type": EntityType.CLUB
+            },
+            "Crystal Palace": {
+                "canonical": "Crystal Palace",
+                "aliases": ["Palace", "the Eagles"],
+                "id": "club_crystal_palace",
+                "type": EntityType.CLUB
+            },
+            "West Ham United": {
+                "canonical": "West Ham United",
+                "aliases": ["West Ham", "the Hammers", "WHUFC"],
+                "id": "club_west_ham",
+                "type": EntityType.CLUB
+            },
+            "Bayern Munich": {
+                "canonical": "Bayern Munich",
+                "aliases": ["Bayern", "FC Bayern"],
+                "id": "club_bayern_munich",
+                "type": EntityType.CLUB
+            },
+            "Real Madrid": {
+                "canonical": "Real Madrid",
+                "aliases": ["Madrid", "Los Blancos"],
+                "id": "club_real_madrid",
+                "type": EntityType.CLUB
+            },
+            "Barcelona": {
+                "canonical": "Barcelona",
+                "aliases": ["Barça", "Barca", "FC Barcelona"],
+                "id": "club_barcelona",
+                "type": EntityType.CLUB
+            },
+            "Paris Saint-Germain": {
+                "canonical": "Paris Saint-Germain",
+                "aliases": ["PSG", "Paris SG"],
+                "id": "club_psg",
+                "type": EntityType.CLUB
+            },
         }
         
-        # Tournament Dictionary
-        self.tournament_dict = {
-            "EFL Cup": "Tournament",
-            "FA Cup": "Tournament",
-            "Premier League": "Tournament",
-            "Champions League": "Tournament",
-            "Europa League": "Tournament",
-            "World Cup": "Tournament",
-            "Bundesliga": "Tournament",
-            "La Liga": "Tournament",
-            "Serie A": "Tournament",
-            "Ligue 1": "Tournament",
-            "MLS Cup": "Tournament",
+        # Competition Dictionary
+        self.competition_dict = {
+            "EFL Cup": {
+                "canonical": "EFL Cup",
+                "aliases": ["Carabao Cup", "League Cup"],
+                "id": "competition_efl_cup",
+                "type": EntityType.TOURNAMENT
+            },
+            "FA Cup": {
+                "canonical": "FA Cup",
+                "aliases": ["The FA Cup"],
+                "id": "competition_fa_cup",
+                "type": EntityType.TOURNAMENT
+            },
+            "Premier League": {
+                "canonical": "Premier League",
+                "aliases": ["EPL", "English Premier League"],
+                "id": "competition_premier_league",
+                "type": EntityType.TOURNAMENT
+            },
+            "Champions League": {
+                "canonical": "UEFA Champions League",
+                "aliases": ["Champions League", "UCL", "European Cup"],
+                "id": "competition_champions_league",
+                "type": EntityType.TOURNAMENT
+            },
+            "Europa League": {
+                "canonical": "UEFA Europa League",
+                "aliases": ["Europa League", "UEL"],
+                "id": "competition_europa_league",
+                "type": EntityType.TOURNAMENT
+            },
+            "World Cup": {
+                "canonical": "FIFA World Cup",
+                "aliases": ["World Cup", "WC"],
+                "id": "competition_world_cup",
+                "type": EntityType.TOURNAMENT
+            },
         }
         
         # Stadium Dictionary
         self.stadium_dict = {
-            "Old Trafford Stadium": "Stadium",
-            "Emirates Stadium": "Stadium",
-            "Wembley Stadium": "Stadium",
-            "Stamford Bridge": "Stadium",
-            "Anfield": "Stadium",
-            "Etihad Stadium": "Stadium",
+            "Wembley": {
+                "canonical": "Wembley Stadium",
+                "aliases": ["Wembley"],
+                "id": "stadium_wembley",
+                "type": EntityType.STADIUM
+            },
+            "Stamford Bridge": {
+                "canonical": "Stamford Bridge",
+                "aliases": ["the Bridge"],
+                "id": "stadium_stamford_bridge",
+                "type": EntityType.STADIUM
+            },
+            "Old Trafford": {
+                "canonical": "Old Trafford",
+                "aliases": ["Theatre of Dreams"],
+                "id": "stadium_old_trafford",
+                "type": EntityType.STADIUM
+            },
+            "Emirates Stadium": {
+                "canonical": "Emirates Stadium",
+                "aliases": ["Emirates", "the Emirates"],
+                "id": "stadium_emirates",
+                "type": EntityType.STADIUM
+            },
+            "Anfield": {
+                "canonical": "Anfield",
+                "aliases": [],
+                "id": "stadium_anfield",
+                "type": EntityType.STADIUM
+            },
+            "Etihad Stadium": {
+                "canonical": "Etihad Stadium",
+                "aliases": ["Etihad"],
+                "id": "stadium_etihad",
+                "type": EntityType.STADIUM
+            },
         }
+        
+        # Build reverse index for fast lookup (canonical + aliases → entry)
+        self._build_dictionary_indices()
+    
+    def _build_dictionary_indices(self):
+        """
+        构建反向索引以支持快速查找
+        
+        索引结构：
+        {
+            "exact": {name_lower → (dict_name, entry)},
+            "tokens": {token_lower → [(dict_name, entry, full_name)]},
+        }
+        """
+        self.dict_index = {
+            "exact": {},    # 精确匹配（canonical + aliases）
+            "tokens": {},   # 单token匹配（用于部分匹配）
+        }
+        
+        # Index all dictionaries
+        for dict_name, dictionary in [
+            ("player", self.player_dict),
+            ("coach", self.coach_dict),
+            ("club", self.club_dict),
+            ("competition", self.competition_dict),
+            ("stadium", self.stadium_dict),
+        ]:
+            for canonical, entry in dictionary.items():
+                # Index canonical name
+                self._add_to_index(dict_name, entry, canonical, is_canonical=True)
+                
+                # Index aliases
+                for alias in entry["aliases"]:
+                    self._add_to_index(dict_name, entry, alias, is_canonical=False)
+    
+    def _add_to_index(self, dict_name: str, entry: Dict, name: str, is_canonical: bool):
+        """添加一个名称到索引"""
+        name_lower = name.lower()
+        
+        # Exact match index
+        if name_lower not in self.dict_index["exact"]:
+            self.dict_index["exact"][name_lower] = []
+        self.dict_index["exact"][name_lower].append({
+            "dict": dict_name,
+            "entry": entry,
+            "match_name": name,
+            "is_canonical": is_canonical
+        })
+        
+        # Token-based index (for partial matching)
+        tokens = name_lower.split()
+        for token in tokens:
+            # Skip very common tokens to reduce ambiguity
+            if token in {"the", "of", "fc", "united", "city"}:
+                continue
+            
+            if token not in self.dict_index["tokens"]:
+                self.dict_index["tokens"][token] = []
+            self.dict_index["tokens"][token].append({
+                "dict": dict_name,
+                "entry": entry,
+                "full_name": name,
+                "is_canonical": is_canonical
+            })
     
     def _init_syntax_patterns(self):
         """初始化语法模式（Layer 3）"""
@@ -577,108 +821,221 @@ class EntityExtractor:
         return candidates
     
     # ========================================================================
-    # Layer 2: Dictionary / Gazetteer (Prior Knowledge)
+    # Layer 2: Dictionary Enrichment & Typing (Validation Layer)
     # ========================================================================
     
     def _enrich_with_dictionary(self, candidates: List[Dict], text: str) -> List[Dict]:
         """
-        Layer 2: 使用词典丰富候选实体
+        Layer 2: Dictionary-based validation and typing
         
-        职责：提供先验知识，不做最终裁决
-        约束：允许多个可能身份共存
+        约束：
+        - 不引入新的 span
+        - 不扫描候选 span 之外的原始文本
+        - 不删除候选
+        - 不进行语法推理
+        
+        职责：
+        - 为候选实体匹配词典
+        - 设置 type 和 confidence
+        - 附加 dictionary_hit 信息
+        
+        匹配规则：
+        1. 精确匹配 canonical name（最高优先级）
+        2. 精确匹配 alias
+        3. Token-aligned 部分匹配（需要验证token边界）
+        4. 单token匹配惩罚（降低confidence）
         
         Returns:
-            Enriched candidates with:
-            - possible_types: List[str]  # From dictionary
-            - dictionary_confidence: float
+            Enriched candidates (不修改原列表，返回新列表)
         """
         enriched = []
         
         for candidate in candidates:
-            entity_text = candidate["text"]
+            # Create a copy to avoid modifying original
+            enriched_candidate = candidate.copy()
             
-            # Check person dictionary
-            if entity_text in self.person_dict:
-                candidate["possible_types"] = self.person_dict[entity_text]
-                candidate["confidence"] += 0.3
-                candidate["source"]["dictionary"] = True
+            # Try dictionary matching
+            match_result = self._match_dictionary(enriched_candidate)
             
-            # Check club dictionary (exact match or alias)
-            elif self._is_club_in_dict(entity_text):
-                candidate["type"] = EntityType.CLUB
-                candidate["confidence"] += 0.3
-                candidate["source"]["dictionary"] = True
+            if match_result:
+                # Set type from dictionary
+                enriched_candidate["type"] = match_result["entry"]["type"]
+                
+                # Increase confidence based on match quality
+                confidence_boost = self._calculate_confidence_boost(
+                    match_result, enriched_candidate
+                )
+                enriched_candidate["confidence"] += confidence_boost
+                
+                # Set dictionary source flag
+                enriched_candidate["source"]["dictionary"] = True
+                
+                # Attach dictionary hit metadata
+                enriched_candidate["dictionary_hit"] = {
+                    "dict": match_result["dict"],
+                    "canonical": match_result["entry"]["canonical"],
+                    "id": match_result["entry"]["id"],
+                    "match_type": match_result["match_type"],
+                    "matched_name": match_result["matched_name"]
+                }
             
-            # Check tournament dictionary
-            elif entity_text in self.tournament_dict:
-                candidate["type"] = EntityType.TOURNAMENT
-                candidate["confidence"] += 0.3
-                candidate["source"]["dictionary"] = True
-            
-            # Check stadium dictionary
-            elif entity_text in self.stadium_dict:
-                candidate["type"] = EntityType.STADIUM
-                candidate["confidence"] += 0.3
-                candidate["source"]["dictionary"] = True
-            
-            enriched.append(candidate)
-        
-        # Also add dictionary-only entities not found by NER
-        enriched.extend(self._find_dictionary_only_entities(text))
+            enriched.append(enriched_candidate)
         
         return enriched
     
-    def _is_club_in_dict(self, text: str) -> bool:
-        """检查是否为已知俱乐部（包括别名）"""
-        if text in self.club_dict:
-            return True
+    def _match_dictionary(self, candidate: Dict) -> Optional[Dict]:
+        """
+        为候选实体匹配词典条目
         
-        # Check aliases
+        Returns:
+            {
+                "dict": str,           # player | coach | club | competition | stadium
+                "entry": Dict,         # 完整词典条目
+                "match_type": str,     # canonical | alias | partial | single_token
+                "matched_name": str,   # 匹配到的名称
+            }
+            或 None（无匹配）
+        """
+        entity_text = candidate["text"]
+        entity_text_lower = entity_text.lower()
+        
+        # 1. Exact match (canonical or alias)
+        if entity_text_lower in self.dict_index["exact"]:
+            matches = self.dict_index["exact"][entity_text_lower]
+            
+            # Prefer canonical match
+            for match in matches:
+                if match["is_canonical"]:
+                    return {
+                        "dict": match["dict"],
+                        "entry": match["entry"],
+                        "match_type": "canonical",
+                        "matched_name": match["match_name"]
+                    }
+            
+            # Fallback to alias match
+            if matches:
+                match = matches[0]
+                return {
+                    "dict": match["dict"],
+                    "entry": match["entry"],
+                    "match_type": "alias",
+                    "matched_name": match["match_name"]
+                }
+        
+        # 2. Partial match (token-aligned only)
+        tokens = candidate.get("tokens", [])
+        if tokens:
+            partial_match = self._try_partial_match(entity_text, tokens)
+            if partial_match:
+                return partial_match
+        
+        return None
+    
+    def _try_partial_match(self, entity_text: str, tokens: List) -> Optional[Dict]:
+        """
+        尝试部分匹配（基于 token 对齐）
+        
+        约束：只匹配完整的 token 序列，不做子串匹配
+        """
+        entity_tokens = [t.text.lower() for t in tokens]
+        
+        # 单token情况：需要更严格的验证
+        if len(entity_tokens) == 1:
+            token = entity_tokens[0]
+            if token in self.dict_index["tokens"]:
+                candidates = self.dict_index["tokens"][token]
+                
+                # 只有当该token是某个条目的唯一标识时才匹配
+                # 例如 "Arsenal" 可以单独匹配，但 "United" 太模糊
+                valid_candidates = [
+                    c for c in candidates
+                    if c["full_name"].lower().split() == [token]  # 单token名称
+                    or c["is_canonical"]  # 或者是canonical的一部分
+                ]
+                
+                if len(valid_candidates) == 1:
+                    match = valid_candidates[0]
+                    return {
+                        "dict": match["dict"],
+                        "entry": match["entry"],
+                        "match_type": "single_token",
+                        "matched_name": match["full_name"]
+                    }
+        
+        # 多token情况：尝试匹配完整的名称
+        # 检查是否有词典条目的所有tokens都在候选中
+        for token in entity_tokens:
+            if token not in self.dict_index["tokens"]:
+                continue
+            
+            for match_candidate in self.dict_index["tokens"][token]:
+                dict_tokens = match_candidate["full_name"].lower().split()
+                
+                # 检查所有词典tokens是否都在候选tokens中（顺序一致）
+                if self._tokens_aligned(entity_tokens, dict_tokens):
+                    return {
+                        "dict": match_candidate["dict"],
+                        "entry": match_candidate["entry"],
+                        "match_type": "partial",
+                        "matched_name": match_candidate["full_name"]
+                    }
+        
+        return None
+    
+    def _tokens_aligned(self, candidate_tokens: List[str], dict_tokens: List[str]) -> bool:
+        """
+        检查词典tokens是否与候选tokens对齐（保持顺序）
+        
+        Example:
+            candidate: ["crystal", "palace"]
+            dict: ["palace"]
+            → False (不完整)
+            
+            candidate: ["crystal", "palace"]
+            dict: ["crystal", "palace"]
+            → True
+        """
+        # 词典tokens必须是候选tokens的连续子序列
+        if len(dict_tokens) > len(candidate_tokens):
+            return False
+        
+        # 尝试找到匹配的起始位置
+        for i in range(len(candidate_tokens) - len(dict_tokens) + 1):
+            if candidate_tokens[i:i+len(dict_tokens)] == dict_tokens:
+                # 必须是完整匹配（不能是候选的一部分）
+                return len(dict_tokens) == len(candidate_tokens)
+        
+        return False
+    
+    def _calculate_confidence_boost(self, match_result: Dict, candidate: Dict) -> float:
+        """
+        根据匹配质量计算confidence提升
+        
+        规则：
+        - canonical match: +0.4
+        - alias match: +0.3
+        - partial match: +0.2
+        - single_token ambiguous: +0.1
+        """
+        match_type = match_result["match_type"]
+        
+        if match_type == "canonical":
+            return 0.4
+        elif match_type == "alias":
+            return 0.3
+        elif match_type == "partial":
+            return 0.2
+        elif match_type == "single_token":
+            # 单token匹配给予较低confidence
+            return 0.15
+        
+        return 0.0
         for club_name, metadata in self.club_dict.items():
             if text in metadata.get("aliases", []):
                 return True
         
-        return False
-    
-    def _find_dictionary_only_entities(self, text: str) -> List[Dict]:
-        """查找词典中但 NER 未发现的实体"""
-        entities = []
-        
-        # Check all clubs
-        for club_name in self.club_dict.keys():
-            if club_name in text:
-                entities.append({
-                    "text": club_name,
-                    "span": None,
-                    "ner_label": None,
-                    "tokens": [],
-                    "type": EntityType.CLUB,
-                    "confidence": 0.3,
-                    "source": {
-                        "ner": False,
-                        "dictionary": True,
-                        "syntax": False
-                    }
-                })
-        
-        # Check tournaments
-        for tournament_name in self.tournament_dict.keys():
-            if tournament_name in text:
-                entities.append({
-                    "text": tournament_name,
-                    "span": None,
-                    "ner_label": None,
-                    "tokens": [],
-                    "type": EntityType.TOURNAMENT,
-                    "confidence": 0.3,
-                    "source": {
-                        "ner": False,
-                        "dictionary": True,
-                        "syntax": False
-                    }
-                })
-        
-        return entities
+        return 0.0
     
     # ========================================================================
     # Layer 3: Syntax & Context Reasoning (Role Disambiguation)
@@ -689,17 +1046,41 @@ class EntityExtractor:
         Layer 3: 使用语法和上下文推理最终角色
         
         职责：基于依存句法做角色消歧
-        优先级：Syntax > Dictionary > NER Label
+        优先级：Dictionary > Syntax > NER Label
         
         核心规则：
-        1. Coach 识别：PERSON + poss → team-like noun
-        2. Player 识别：PERSON + match action verb (nsubj/agent/pobj)
-        3. Tournament 识别：结构化模式（Cup/League + 修饰语）
+        1. 如果 Layer 2 已通过词典确定类型，直接采纳（除非语法有强否定）
+        2. Coach 识别：PERSON + poss → team-like noun
+        3. Player 识别：PERSON + match action verb (nsubj/agent/pobj)
+        4. Tournament 识别：结构化模式（Cup/League + 修饰语）
         """
         final_entities = []
         
         for candidate in candidates:
-            # Skip if already determined by dictionary
+            # Dictionary已确定类型，直接采纳
+            if candidate.get("dictionary_hit"):
+                dict_type = candidate["dictionary_hit"]["dict"]
+                
+                # 特殊情况：如果词典说是 player，但语法强烈指示 coach，则覆盖
+                if dict_type == "player" and candidate["ner_label"] == "PERSON":
+                    tokens = candidate.get("tokens", [])
+                    if tokens:
+                        head_token = tokens[-1]
+                        if self._is_coach_by_possession(head_token):
+                            # 语法覆盖词典
+                            candidate["type"] = EntityType.COACH
+                            candidate["confidence"] += 0.2  # 额外奖励
+                            candidate["source"]["syntax"] = True
+                            final_entities.append(candidate)
+                            continue
+                
+                # 其他情况：直接使用词典类型
+                final_entities.append(candidate)
+                continue
+            
+            # Dictionary未确定类型，使用语法推理
+            
+            # Skip if already determined (Club/Tournament/Stadium)
             if candidate["type"] in [EntityType.CLUB, EntityType.TOURNAMENT, EntityType.STADIUM]:
                 final_entities.append(candidate)
                 continue
@@ -713,14 +1094,8 @@ class EntityExtractor:
                     candidate["confidence"] = min(1.0, candidate["confidence"] + confidence_boost)
                     candidate["source"]["syntax"] = True
                 else:
-                    # Fallback: use dictionary hint if available
-                    possible_types = candidate.get("possible_types", [])
-                    if "player" in possible_types:
-                        candidate["type"] = EntityType.PLAYER
-                    elif "coach" in possible_types:
-                        candidate["type"] = EntityType.COACH
-                    else:
-                        candidate["type"] = EntityType.OTHER
+                    # No syntax rule matched
+                    candidate["type"] = EntityType.OTHER
             
             # Apply syntax rules for ORG/EVENT (tournament detection)
             elif candidate["ner_label"] in ["ORG", "EVENT"]:
