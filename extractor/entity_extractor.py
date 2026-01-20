@@ -369,27 +369,38 @@ class EntityExtractor:
             })
     
     def _init_syntax_patterns(self):
-        """初始化语法模式（Layer 3）"""
+        """初始化语法模式（Layer 3 Syntax Reasoning）"""
         
-        # Team-like nouns (for possession pattern)
-        self.team_nouns = {"side", "team", "squad", "outfit", "men"}
+        # Module 1: Possessive / Ownership patterns
+        # football_common_noun for [ENTITY]'s [noun] pattern
+        self.football_team_nouns = {"side", "team", "squad", "club", "xi"}
         
-        # Coach-related nouns
-        self.coach_nouns = {"manager", "coach", "boss", "gaffer"}
-        
-        # Match action verbs (for player identification)
-        self.match_verbs = {
-            "score", "save", "miss", "convert", "take", "shoot",
-            "assist", "head", "volley", "strike", "pass", "dribble",
-            "tackle", "block", "clear", "cross", "chip", "lob",
-            "slot", "fire", "net", "bag", "grab", "notch"
+        # Module 2: Event Role Reasoning
+        # Football event verbs (actions that identify participants)
+        self.football_event_verbs = {
+            "save", "score", "miss", "concede", "win", "lose", "beat", "draw",
+            "sign", "join", "leave", "take", "convert", "shoot", "assist",
+            "head", "volley", "strike", "pass", "dribble", "tackle", "block",
+            "clear", "cross", "chip", "lob", "slot", "fire", "net", "bag",
+            "grab", "notch", "play", "face", "meet", "defeat"
         }
         
-        # Tournament structure nouns
-        self.tournament_structure = {
-            "semi-finals", "final", "finals", "quarter-final", 
-            "group stage", "knockout", "round", "leg"
+        # Module 3: Competition Context
+        # Tournament stage nouns
+        self.competition_stage_nouns = {
+            "final", "semi-final", "quarter-final", "group", "round",
+            "finals", "semi-finals", "quarter-finals"
         }
+        
+        # Module 5: Apposition / Role Title
+        # Player role nouns
+        self.player_role_nouns = {
+            "goalkeeper", "keeper", "forward", "striker", "defender",
+            "midfielder", "winger", "fullback", "centre-back", "player"
+        }
+        
+        # Coach/Manager role nouns
+        self.coach_role_nouns = {"manager", "coach", "boss", "gaffer", "head coach"}
     
     def extract_participants(self, text: str) -> List[Dict[str, any]]:
         """
@@ -414,15 +425,60 @@ class EntityExtractor:
         # Parse text with spaCy
         doc = self.nlp(text)
         
-        print("spacy处理结果：" + str(doc.ents))
+        print("\n" + "=" * 80)
+        print("🔍 spaCy NER 识别结果:")
+        print("-" * 80)
+        if doc.ents:
+            for ent in doc.ents:
+                print(f"  {ent.text:30} [{ent.label_}]")
+        else:
+            print("  (无)")
+        
         # Layer 1: Extract candidate entities from spaCy NER
         candidates = self._extract_ner_candidates(doc)
-        
+        print("\n" + "=" * 80)
+        print("📋 Layer 1: 语法候选生成 (共 {} 个)".format(len(candidates)))
+        print("-" * 80)
+        for c in candidates:
+            sources = ", ".join(c.get("debug_sources", []))[:40]
+            print(f"  {c['text']:30} [NER:{c['ner_label'] or 'None':8}] (来源: {sources})")
+
         # Layer 2: Enrich with dictionary knowledge
         enriched = self._enrich_with_dictionary(candidates, text)
-        
+        print("\n" + "=" * 80)
+        print("📚 Layer 2: 词典匹配增强 (共 {} 个)".format(len(enriched)))
+        print("-" * 80)
+        # for e in enriched:
+        #     type_str = e['type'].value if e['type'] else "None"
+        #     conf_str = f"{e['confidence']:.2f}"
+        #     dict_info = ""
+        #     if e.get('dictionary_hit'):
+        #         dict_info = f"[{e['dictionary_hit']['dict']}:{e['dictionary_hit']['match_type']}]"
+        #     print(f"  {e['text']:30} Type:{type_str:12} Conf:{conf_str} {dict_info}")
+        for e in enriched:  
+            print(e)
+            print("\n")
+
         # Layer 3: Apply syntax reasoning for role disambiguation
         final_entities = self._apply_syntax_reasoning(enriched, doc)
+        print("\n" + "=" * 80)
+        print("🎯 Layer 3: 语法推理最终结果 (共 {} 个)".format(len(final_entities)))
+        print("-" * 80)
+        for f in final_entities:
+            type_str = f['type'].value if f['type'] else "None"
+            conf_str = f"{f['confidence']:.2f}"
+            source_flags = []
+            if f['source'].get('ner'): source_flags.append("NER")
+            if f['source'].get('dictionary'): source_flags.append("Dict")
+            if f['source'].get('syntax'): source_flags.append("Syn")
+            source_str = "+".join(source_flags) if source_flags else "None"
+            
+            syntax_evidence = ""
+            if f.get('syntax_evidence'):
+                syntax_evidence = f" 🔧{','.join(f['syntax_evidence'][:2])}"
+            
+            print(f"  {f['text']:30} Type:{type_str:12} Conf:{conf_str} [{source_str}]{syntax_evidence}")
+        print("=" * 80 + "\n")
         
         # Convert to legacy format for backward compatibility
         return self._convert_to_legacy_format(final_entities)
@@ -1038,215 +1094,434 @@ class EntityExtractor:
         return 0.0
     
     # ========================================================================
-    # Layer 3: Syntax & Context Reasoning (Role Disambiguation)
+    # Layer 3: Syntax Reasoning (语法推理兜底层)
     # ========================================================================
     
     def _apply_syntax_reasoning(self, candidates: List[Dict], doc: Doc) -> List[Dict]:
         """
-        Layer 3: 使用语法和上下文推理最终角色
+        Layer 3: Syntax-based Role Disambiguation (兜底层)
         
-        职责：基于依存句法做角色消歧
-        优先级：Dictionary > Syntax > NER Label
+        约束：
+        - 不得新增 span
+        - 不得依赖词典
+        - 只基于 spaCy 的 dependency / POS / lemma
         
-        核心规则：
-        1. 如果 Layer 2 已通过词典确定类型，直接采纳（除非语法有强否定）
-        2. Coach 识别：PERSON + poss → team-like noun
-        3. Player 识别：PERSON + match action verb (nsubj/agent/pobj)
-        4. Tournament 识别：结构化模式（Cup/League + 修饰语）
+        职责：
+        - 处理 Layer 2 未确定类型的候选
+        - 基于句法结构推断语义角色
+        - 允许修改 type、confidence、source["syntax"]
+        
+        处理优先级：
+        1. Dictionary 已确定 (confidence >= 0.6) → 跳过
+        2. Dictionary 未确定或低置信度 → 应用语法推理
         """
         final_entities = []
         
+        # Build candidate index for coordination reasoning
+        candidate_by_span = {tuple(c["span"]): c for c in candidates}
+        
         for candidate in candidates:
-            # Dictionary已确定类型，直接采纳
-            if candidate.get("dictionary_hit"):
-                dict_type = candidate["dictionary_hit"]["dict"]
-                
-                # 特殊情况：如果词典说是 player，但语法强烈指示 coach，则覆盖
-                if dict_type == "player" and candidate["ner_label"] == "PERSON":
-                    tokens = candidate.get("tokens", [])
-                    if tokens:
-                        head_token = tokens[-1]
-                        if self._is_coach_by_possession(head_token):
-                            # 语法覆盖词典
-                            candidate["type"] = EntityType.COACH
-                            candidate["confidence"] += 0.2  # 额外奖励
-                            candidate["source"]["syntax"] = True
-                            final_entities.append(candidate)
-                            continue
-                
-                # 其他情况：直接使用词典类型
+            # Initialize syntax_evidence if not present
+            if "syntax_evidence" not in candidate:
+                candidate["syntax_evidence"] = []
+            
+            # Skip high-confidence dictionary matches
+            if (candidate.get("dictionary_hit") and 
+                candidate.get("confidence", 0) >= 0.6 and
+                candidate.get("type")):
                 final_entities.append(candidate)
                 continue
             
-            # Dictionary未确定类型，使用语法推理
+            # Apply syntax reasoning for uncertain candidates
+            self._apply_syntax_modules(candidate, doc, candidate_by_span)
             
-            # Skip if already determined (Club/Tournament/Stadium)
-            if candidate["type"] in [EntityType.CLUB, EntityType.TOURNAMENT, EntityType.STADIUM]:
-                final_entities.append(candidate)
-                continue
+            # Apply downgrade rules
+            self._apply_downgrade_rules(candidate, doc)
             
-            # Apply syntax rules for PERSON entities
-            if candidate["ner_label"] == "PERSON" and candidate.get("tokens"):
-                entity_type, confidence_boost = self._determine_person_role(candidate, doc)
-                
-                if entity_type:
-                    candidate["type"] = entity_type
-                    candidate["confidence"] = min(1.0, candidate["confidence"] + confidence_boost)
-                    candidate["source"]["syntax"] = True
-                else:
-                    # No syntax rule matched
-                    candidate["type"] = EntityType.OTHER
+            # Cap confidence at 0.75 for syntax-only inferences
+            if candidate.get("source", {}).get("syntax") and not candidate.get("dictionary_hit"):
+                candidate["confidence"] = min(0.75, candidate["confidence"])
             
-            # Apply syntax rules for ORG/EVENT (tournament detection)
-            elif candidate["ner_label"] in ["ORG", "EVENT"]:
-                if self._is_tournament_by_structure(candidate, doc):
-                    candidate["type"] = EntityType.TOURNAMENT
-                    candidate["confidence"] = min(1.0, candidate["confidence"] + 0.4)
-                    candidate["source"]["syntax"] = True
-                elif not candidate["type"]:
-                    # Default ORG to Club if not determined
-                    candidate["type"] = EntityType.CLUB
+            # Ensure confidence is in [0, 1]
+            candidate["confidence"] = max(0.0, min(1.0, candidate["confidence"]))
             
             final_entities.append(candidate)
         
         return final_entities
     
-    def _determine_person_role(self, candidate: Dict, doc: Doc) -> Tuple[Optional[EntityType], float]:
+    def _apply_syntax_modules(self, candidate: Dict, doc: Doc, candidate_by_span: Dict):
         """
-        确定 PERSON 的角色（Coach 或 Player）
+        应用所有语法推理模块
         
-        强规则：
-        1. Coach: PERSON —poss→ team-like noun (confidence +0.4)
-        2. Player: PERSON 与 match action verb 有语法关系 (confidence +0.4)
-        
-        Returns:
-            (EntityType, confidence_boost)
+        执行顺序（重要）：
+        1. Possessive/Ownership (CLUB)
+        2. Event Role (PLAYER)
+        3. Competition Context (TOURNAMENT)
+        4. Coordination (type inheritance)
+        5. Apposition/Role Title (PLAYER/COACH)
         """
-        tokens = candidate["tokens"]
+        tokens = candidate.get("tokens", [])
         if not tokens:
-            return None, 0.0
+            return
         
-        # Get the head token of the entity
-        head_token = tokens[-1] if tokens else None
+        # Module 1: Possessive / Ownership
+        if self._check_possessive_ownership(candidate, tokens):
+            return  # Early return if strong signal
         
-        # Rule 1: Coach detection via possession
-        # Pattern: "Arteta's Arsenal side"
-        if self._is_coach_by_possession(head_token):
-            return EntityType.COACH, 0.4
+        # Module 2: Event Role Reasoning
+        if self._check_event_participant(candidate, tokens):
+            return  # Early return if strong signal
         
-        # Rule 2: Coach detection via modification
-        # Pattern: "manager Pep Guardiola" or "coach Carlo Ancelotti"
-        if self._is_coach_by_modification(tokens, doc):
-            return EntityType.COACH, 0.4
+        # Module 3: Competition Context
+        if self._check_competition_context(candidate, tokens):
+            return  # Early return if strong signal
         
-        # Rule 3: Player detection via match action verbs
-        # Pattern: "Kepa saving the spot-kick", "spot-kick taken by Maxence"
-        if self._is_player_by_match_action(head_token):
-            return EntityType.PLAYER, 0.4
+        # Module 4: Coordination
+        if self._check_coordination(candidate, tokens, candidate_by_span):
+            return  # Early return if inherited type
         
-        return None, 0.0
+        # Module 5: Apposition / Role Title
+        if self._check_role_apposition(candidate, tokens, doc):
+            return  # Early return if role identified
     
-    def _is_coach_by_possession(self, token: Optional[Token]) -> bool:
+    # ========================================================================
+    # Module 1: Possessive / Ownership Reasoning
+    # ========================================================================
+    
+    def _check_possessive_ownership(self, candidate: Dict, tokens: List[Token]) -> bool:
         """
-        检查是否通过所有格模式识别为 Coach
+        模块 1：所有关系推理
         
-        Pattern: PERSON —poss→ team-like noun
-        Example: "Arteta's Arsenal side"
+        模式：[ENTITY]'s [football_common_noun]
+        
+        依存条件：
+        - candidate token 是 poss
+        - 或其 child 中存在 's
+        - head 是 football_team_noun
+        
+        推理结果：
+        - type = CLUB
+        - confidence += 0.3
+        - syntax_evidence += ["possessive_team_pattern"]
         """
-        if not token:
-            return False
-        
-        # Check if token has possessive dependency
-        for child in token.children:
-            if child.dep_ == "poss":
-                # Check if the head is a team-like noun
-                if token.head.lemma_.lower() in self.team_nouns:
+        for token in tokens:
+            # Check if token is possessive
+            if token.dep_ == "poss":
+                # Check if head is a football team noun
+                if token.head.lemma_.lower() in self.football_team_nouns:
+                    candidate["type"] = EntityType.CLUB
+                    candidate["confidence"] += 0.3
+                    candidate["source"]["syntax"] = True
+                    candidate["syntax_evidence"].append("possessive_team_pattern")
                     return True
+            
+            # Check if token has 's as child
+            for child in token.children:
+                if child.text == "'s" or child.dep_ == "case":
+                    # Check if token's head is a team noun
+                    if token.head.lemma_.lower() in self.football_team_nouns:
+                        candidate["type"] = EntityType.CLUB
+                        candidate["confidence"] += 0.3
+                        candidate["source"]["syntax"] = True
+                        candidate["syntax_evidence"].append("possessive_team_pattern")
+                        return True
         
-        # Reverse check: if this token is the possessive
-        if token.dep_ == "poss" and token.head.lemma_.lower() in self.team_nouns:
+        return False
+    
+    # ========================================================================
+    # Module 2: Event Role Reasoning
+    # ========================================================================
+    
+    def _check_event_participant(self, candidate: Dict, tokens: List[Token]) -> bool:
+        """
+        模块 2：事件参与者推理
+        
+        核心思想：实体 = 足球事件的参与者
+        
+        句法条件：
+        - candidate token 作为 nsubj / dobj / pobj
+        - 其 head 或 ancestor 是 football verb
+        
+        推理结果：
+        - 如果 candidate 为 PERSON-like span：
+          - type = PLAYER
+          - confidence += 0.35
+          - syntax_evidence += ["event_participant"]
+        """
+        for token in tokens:
+            # Check if token is subject/object of football event
+            if token.dep_ in ["nsubj", "dobj", "pobj", "nsubjpass"]:
+                # Check if head is football verb
+                if token.head.lemma_.lower() in self.football_event_verbs:
+                    # PERSON-like span → PLAYER
+                    if self._is_person_like(candidate):
+                        candidate["type"] = EntityType.PLAYER
+                        candidate["confidence"] += 0.35
+                        candidate["source"]["syntax"] = True
+                        candidate["syntax_evidence"].append("event_participant")
+                        return True
+            
+            # Check ancestors (up to 2 levels)
+            head = token.head
+            for _ in range(2):
+                if head.lemma_.lower() in self.football_event_verbs:
+                    if self._is_person_like(candidate):
+                        candidate["type"] = EntityType.PLAYER
+                        candidate["confidence"] += 0.35
+                        candidate["source"]["syntax"] = True
+                        candidate["syntax_evidence"].append("event_participant")
+                        return True
+                if head == head.head:  # Reached root
+                    break
+                head = head.head
+        
+        return False
+    
+    def _is_person_like(self, candidate: Dict) -> bool:
+        """
+        判断候选是否为 PERSON-like span
+        
+        条件：
+        - ner_label == "PERSON"
+        - 或所有 tokens 都是 PROPN
+        """
+        if candidate.get("ner_label") == "PERSON":
+            return True
+        
+        tokens = candidate.get("tokens", [])
+        if tokens and all(t.pos_ == "PROPN" for t in tokens):
             return True
         
         return False
     
-    def _is_coach_by_modification(self, tokens: List[Token], doc: Doc) -> bool:
+    # ========================================================================
+    # Module 3: Competition Context Reasoning
+    # ========================================================================
+    
+    def _check_competition_context(self, candidate: Dict, tokens: List[Token]) -> bool:
         """
-        检查是否通过修饰模式识别为 Coach
+        模块 3：赛事语境推理
         
-        Pattern: coach-noun + PERSON
-        Example: "manager Pep Guardiola"
+        结构：[ENTITY] + stage noun
+        
+        句法条件：
+        - candidate 是 compound
+        - 或修饰 stage noun（amod / compound）
+        
+        推理结果：
+        - type = TOURNAMENT
+        - confidence += 0.3
+        - syntax_evidence += ["competition_stage_pattern"]
         """
         for token in tokens:
-            # Check left context
+            # Check if token is compound of stage noun
+            if token.dep_ == "compound":
+                if token.head.lemma_.lower() in self.competition_stage_nouns:
+                    candidate["type"] = EntityType.TOURNAMENT
+                    candidate["confidence"] += 0.3
+                    candidate["source"]["syntax"] = True
+                    candidate["syntax_evidence"].append("competition_stage_pattern")
+                    return True
+            
+            # Check if token modifies stage noun
+            for child in token.children:
+                if child.lemma_.lower() in self.competition_stage_nouns:
+                    candidate["type"] = EntityType.TOURNAMENT
+                    candidate["confidence"] += 0.3
+                    candidate["source"]["syntax"] = True
+                    candidate["syntax_evidence"].append("competition_stage_pattern")
+                    return True
+            
+            # Check if stage noun modifies this token
+            if token.head.lemma_.lower() in self.competition_stage_nouns:
+                if token.dep_ in ["amod", "compound"]:
+                    candidate["type"] = EntityType.TOURNAMENT
+                    candidate["confidence"] += 0.3
+                    candidate["source"]["syntax"] = True
+                    candidate["syntax_evidence"].append("competition_stage_pattern")
+                    return True
+        
+        return False
+    
+    # ========================================================================
+    # Module 4: Coordination Reasoning
+    # ========================================================================
+    
+    def _check_coordination(self, candidate: Dict, tokens: List[Token], 
+                           candidate_by_span: Dict) -> bool:
+        """
+        模块 4：并列继承推理
+        
+        结构：ENTITY_A and ENTITY_B
+        
+        句法条件：
+        - candidate token.dep_ == "conj"
+        - head entity 已有 type
+        - POS / 依存角色一致
+        
+        推理：
+        - candidate.type = head.type
+        - confidence += 0.2
+        - confidence 不得超过 head 的 confidence
+        - syntax_evidence += ["coordination_inference"]
+        """
+        for token in tokens:
+            if token.dep_ == "conj":
+                # Find head entity in candidate list
+                head_token = token.head
+                
+                # Search for head entity candidate
+                for span, head_candidate in candidate_by_span.items():
+                    head_tokens = head_candidate.get("tokens", [])
+                    if head_token in head_tokens and head_candidate.get("type"):
+                        # Check POS consistency
+                        if token.pos_ == head_token.pos_:
+                            # Inherit type
+                            candidate["type"] = head_candidate["type"]
+                            
+                            # Confidence boost (capped by head's confidence)
+                            boost = 0.2
+                            candidate["confidence"] += boost
+                            head_conf = head_candidate.get("confidence", 0.5)
+                            candidate["confidence"] = min(candidate["confidence"], head_conf)
+                            
+                            candidate["source"]["syntax"] = True
+                            candidate["syntax_evidence"].append("coordination_inference")
+                            return True
+        
+        return False
+    
+    # ========================================================================
+    # Module 5: Apposition / Role Title Reasoning
+    # ========================================================================
+    
+    def _check_role_apposition(self, candidate: Dict, tokens: List[Token], doc: Doc) -> bool:
+        """
+        模块 5：同位语 / 头衔推理
+        
+        结构一：[role noun] + [Name]
+        结构二：[Name], the [role noun]
+        
+        句法条件：
+        - appos
+        - 或 compound
+        - 或 名词修饰关系
+        
+        推理：
+        - role ∈ 球员角色 → PLAYER
+        - role ∈ 管理角色 → COACH
+        - confidence += 0.4
+        - syntax_evidence += ["role_apposition"]
+        """
+        for token in tokens:
+            # Check left context (role noun before name)
             if token.i > 0:
                 prev_token = doc[token.i - 1]
-                if prev_token.lemma_.lower() in self.coach_nouns:
+                role_lemma = prev_token.lemma_.lower()
+                
+                if role_lemma in self.player_role_nouns:
+                    candidate["type"] = EntityType.PLAYER
+                    candidate["confidence"] += 0.4
+                    candidate["source"]["syntax"] = True
+                    candidate["syntax_evidence"].append("role_apposition")
+                    return True
+                
+                if role_lemma in self.coach_role_nouns:
+                    candidate["type"] = EntityType.COACH
+                    candidate["confidence"] += 0.4
+                    candidate["source"]["syntax"] = True
+                    candidate["syntax_evidence"].append("role_apposition")
                     return True
             
-            # Check if person is apposition to coach noun
-            if token.dep_ == "appos" and token.head.lemma_.lower() in self.coach_nouns:
-                return True
-        
-        return False
-    
-    def _is_player_by_match_action(self, token: Optional[Token]) -> bool:
-        """
-        检查是否通过比赛动作动词识别为 Player
-        
-        Pattern: PERSON + match action verb (nsubj/agent/pobj)
-        Example: "Kepa saving", "taken by Maxence"
-        """
-        if not token:
-            return False
-        
-        # Check if person is subject/agent of match verb
-        if token.head.lemma_.lower() in self.match_verbs:
-            if token.dep_ in ["nsubj", "agent", "pobj", "nsubjpass"]:
-                return True
-        
-        # Check if person has match verb as child
-        for child in token.children:
-            if child.lemma_.lower() in self.match_verbs:
-                return True
-        
-        # 特殊处理：被动语态 "taken by Person"
-        # 检查是否为 "by" 的宾语，且 "by" 的父节点是 match verb
-        if token.dep_ == "pobj":
-            # 找到 "by" 介词
-            prep = token.head
-            if prep.lemma_.lower() == "by":
-                # 检查 "by" 的父节点是否为 match verb
-                if prep.head.lemma_.lower() in self.match_verbs:
+            # Check apposition relation
+            if token.dep_ == "appos":
+                head_lemma = token.head.lemma_.lower()
+                
+                if head_lemma in self.player_role_nouns:
+                    candidate["type"] = EntityType.PLAYER
+                    candidate["confidence"] += 0.4
+                    candidate["source"]["syntax"] = True
+                    candidate["syntax_evidence"].append("role_apposition")
+                    return True
+                
+                if head_lemma in self.coach_role_nouns:
+                    candidate["type"] = EntityType.COACH
+                    candidate["confidence"] += 0.4
+                    candidate["source"]["syntax"] = True
+                    candidate["syntax_evidence"].append("role_apposition")
+                    return True
+            
+            # Check if role noun is head
+            if token.head.lemma_.lower() in self.player_role_nouns:
+                if token.dep_ in ["compound", "amod"]:
+                    candidate["type"] = EntityType.PLAYER
+                    candidate["confidence"] += 0.4
+                    candidate["source"]["syntax"] = True
+                    candidate["syntax_evidence"].append("role_apposition")
+                    return True
+            
+            if token.head.lemma_.lower() in self.coach_role_nouns:
+                if token.dep_ in ["compound", "amod"]:
+                    candidate["type"] = EntityType.COACH
+                    candidate["confidence"] += 0.4
+                    candidate["source"]["syntax"] = True
+                    candidate["syntax_evidence"].append("role_apposition")
                     return True
         
         return False
     
-    def _is_tournament_by_structure(self, candidate: Dict, doc: Doc) -> bool:
+    # ========================================================================
+    # Downgrade Rules (否定/降权)
+    # ========================================================================
+    
+    def _apply_downgrade_rules(self, candidate: Dict, doc: Doc):
         """
-        检查是否通过结构模式识别为 Tournament
+        否定 / 降权规则
         
-        Patterns:
-        1. Contains "Cup" / "League" / "Championship"
-        2. Modifies tournament structure nouns (semi-finals, final, etc.)
+        以下情况必须降权：
+        1. candidate 仅作为 amod / det
+        2. candidate 的 head 是普通名词（非事件/非角色）
+        3. candidate 出现在时间短语 / 地点介词结构
+        
+        动作：
+        - confidence -= 0.2 ~ 0.4
+        - syntax_evidence += ["non_entity_syntactic_role"]
         """
-        text = candidate["text"].lower()
-        
-        # Pattern 1: Contains tournament keywords
-        if any(keyword in text for keyword in ["cup", "league", "championship"]):
-            return True
-        
-        # Pattern 2: Modifies tournament structure
         tokens = candidate.get("tokens", [])
-        for token in tokens:
-            for child in token.children:
-                if child.lemma_.lower() in self.tournament_structure:
-                    return True
-            
-            # Check if token modifies structure noun
-            if token.head.lemma_.lower() in self.tournament_structure:
-                return True
+        if not tokens:
+            return
         
-        return False
+        downgrade_amount = 0.0
+        
+        for token in tokens:
+            # Rule 1: amod / det role (非实体角色)
+            if token.dep_ in ["amod", "det"]:
+                downgrade_amount = max(downgrade_amount, 0.3)
+                candidate["syntax_evidence"].append("non_entity_syntactic_role")
+            
+            # Rule 2: Head is common noun (not event/role related)
+            if token.head.pos_ == "NOUN":
+                head_lemma = token.head.lemma_.lower()
+                # Check if head is NOT a football-related noun
+                if (head_lemma not in self.football_team_nouns and
+                    head_lemma not in self.competition_stage_nouns and
+                    head_lemma not in self.player_role_nouns and
+                    head_lemma not in self.coach_role_nouns and
+                    head_lemma not in self.football_event_verbs):
+                    downgrade_amount = max(downgrade_amount, 0.2)
+                    candidate["syntax_evidence"].append("common_noun_context")
+            
+            # Rule 3: Prepositional phrases (in/at + LOCATION)
+            if token.dep_ == "pobj":
+                prep = token.head
+                if prep.lemma_.lower() in ["in", "at", "on"]:
+                    # Likely location, not entity
+                    downgrade_amount = max(downgrade_amount, 0.4)
+                    candidate["syntax_evidence"].append("location_prep_phrase")
+        
+        # Apply downgrade
+        if downgrade_amount > 0:
+            candidate["confidence"] -= downgrade_amount
     
     # ========================================================================
     # Utility: Format Conversion

@@ -247,7 +247,8 @@ def test_multi_dictionary():
     print("🎯 测试场景 7: 多词典协同工作")
     print("="*80 + "\n")
     
-    text = """Carrick's last job as a manager was at Middlesbrough. Inheriting a Boro outfit who were hovering around the Championship relegation zone in October 2022, Carrick’s neat and tidy brand of controlled, attack-minded football, took them to the playoffs that same season."""    
+    # text = """Carrick's last job as a manager was at Middlesbrough. Inheriting a Boro outfit who were hovering around the Championship relegation zone in October 2022, Carrick’s neat and tidy brand of controlled, attack-minded football, took them to the playoffs that same season."""    
+    text = """Mikel Arteta coached Arsenal against Crystal Palace at the Emirates Stadium in the Premier League. Meanwhile, Pep Guardiola led Manchester City to victory over Liverpool at the Etihad Stadium in the same competition."""
     extractor = EntityExtractor()
     doc = extractor.nlp(text)
     
@@ -261,7 +262,7 @@ def test_multi_dictionary():
         sources_str = ", ".join(cand.get("debug_sources", []))
         print(f"{i:2d}. [{cand['span'][0]:3d}-{cand['span'][1]:3d}] {cand['text']:<30s} (来源: {sources_str})")
     
-    print("\n词典分类统计:\n")
+    print("\n词典层处理结果:\n")
     for i, enriched_cand in enumerate(enriched, 1):
         if enriched_cand.get("dictionary_hit"):
             hit = enriched_cand["dictionary_hit"]
