@@ -5,7 +5,17 @@ Example: Using Football Anchor Extraction
 """
 
 import json
-from extractor_v1.anchor_extractor import AnchorExtractor
+import sys
+# 导入模块
+try:
+    from extractor_v1.ollama_backend import OllamaBackend, validate_schema, print_prompt
+    from extractor_v1.anchor_extractor import AnchorExtractor
+except ImportError:
+    # 如果直接运行，尝试添加父目录到路径
+    import os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from extractor_v1.ollama_backend import OllamaBackend, validate_schema, print_prompt
+    from extractor_v1.anchor_extractor import AnchorExtractor
 
 
 def example_1_basic_usage():
@@ -16,12 +26,13 @@ def example_1_basic_usage():
     print()
     
     # 初始化抽取器
-    extractor = AnchorExtractor(model="llama3.2:latest")
+    # extractor = AnchorExtractor(model="qwen3:8b")
+    extractor = AnchorExtractor(model="llama3:latest")
     
     # 准备输入 block
     block = {
         "block_id": "example_001",
-        "text": "Matthijs de Ligt completes €50m move from Bayern Munich to Manchester United on July 30, 2024.",
+        "text": "The Gunners will now face rivals Chelsea to fight for a place in the final at Wembley, with the first leg of their semi-final set for Stamford Bridge on 14 January.",
         "source": "BBC Sport",
         "publish_date": "2024-07-30"
     }
@@ -40,9 +51,10 @@ def example_1_basic_usage():
     # 分析结果
     print("📊 分析:")
     print(f"  - Fact Type: {result['fact_type']}")
-    print(f"  - Need Resolver: {result['need_resolver']}")
     print(f"  - Participants: {len(result['anchors']['participants'])}")
     print(f"  - Temporal Anchors: {len(result['anchors']['temporal_anchors'])}")
+    print(f"  - Constraints: {len(result['anchors']['constraints'])}")
+    print(f"  - LLM 推理时间: {result.get('inference_time', 0):.3f} 秒")
     print()
 
 
@@ -68,7 +80,7 @@ def example_2_event_vs_state():
     
     event_result = extractor.extract_anchors(event_block)
     print(f"→ Fact Type: {event_result['fact_type']}")
-    print(f"→ Need Resolver: {event_result['need_resolver']}")
+    print(f"→ LLM 推理时间: {event_result.get('inference_time', 0):.3f} 秒")
     print(f"→ 解释: 比赛结果是历史事件，一旦发生永远成立")
     print()
     
@@ -85,8 +97,8 @@ def example_2_event_vs_state():
     
     state_result = extractor.extract_anchors(state_block)
     print(f"→ Fact Type: {state_result['fact_type']}")
-    print(f"→ Need Resolver: {state_result['need_resolver']}")
-    print(f"→ 解释: 教练身份是状态事实，随时间变化，需要 resolver 推理有效期")
+    print(f"→ LLM 推理时间: {state_result.get('inference_time', 0):.3f} 秒")
+    print(f"→ 解释: 教练身份是状态事实，随时间变化")
     print()
 
 
@@ -130,15 +142,23 @@ def example_3_batch_processing():
     print("📤 结果统计:")
     print()
     
+    total_time = 0
     for i, result in enumerate(results, 1):
         if "error" in result:
             print(f"Block {i}: ❌ 错误 - {result['error']}")
         else:
+            inference_time = result.get('inference_time', 0)
+            total_time += inference_time
             print(f"Block {i}: {result['block_id']}")
             print(f"  - Fact Type: {result['fact_type']}")
-            print(f"  - Need Resolver: {result['need_resolver']}")
             print(f"  - Participants: {len(result['anchors']['participants'])}")
+            print(f"  - Constraints: {len(result['anchors']['constraints'])}")
+            print(f"  - LLM 推理时间: {inference_time:.3f} 秒")
             print()
+    
+    print(f"总推理时间: {total_time:.3f} 秒")
+    print(f"平均推理时间: {total_time / len(results):.3f} 秒/block")
+    print()
 
 
 def example_4_need_resolver_logic():
@@ -162,6 +182,7 @@ def example_4_need_resolver_logic():
     print(f"Text: {block1['text']}")
     print(f"→ Fact Type: {result1['fact_type']}")
     print(f"→ Need Resolver: {result1['need_resolver']}")
+    print(f"→ LLM 推理时间: {result1.get('inference_time', 0):.3f} 秒")
     print(f"→ 原因: 历史事件不需要有效期")
     print()
     
@@ -177,6 +198,7 @@ def example_4_need_resolver_logic():
     print(f"Text: {block2['text']}")
     print(f"→ Fact Type: {result2['fact_type']}")
     print(f"→ Need Resolver: {result2['need_resolver']}")
+    print(f"→ LLM 推理时间: {result2.get('inference_time', 0):.3f} 秒")
     print(f"→ 原因: 已有结束时间，不需要推理")
     print()
     
@@ -192,6 +214,7 @@ def example_4_need_resolver_logic():
     print(f"Text: {block3['text']}")
     print(f"→ Fact Type: {result3['fact_type']}")
     print(f"→ Need Resolver: {result3['need_resolver']}")
+    print(f"→ LLM 推理时间: {result3.get('inference_time', 0):.3f} 秒")
     print(f"→ 原因: 缺失结束时间，需要 resolver 推理")
     print()
 
@@ -206,14 +229,14 @@ def main():
         # 示例 1
         example_1_basic_usage()
         
-        # 示例 2
-        example_2_event_vs_state()
+        # # 示例 2
+        # example_2_event_vs_state()
         
-        # 示例 3
-        example_3_batch_processing()
+        # # 示例 3
+        # example_3_batch_processing()
         
-        # 示例 4
-        example_4_need_resolver_logic()
+        # # 示例 4
+        # example_4_need_resolver_logic()
         
         print("=" * 100)
         print("✅ 所有示例运行完成")

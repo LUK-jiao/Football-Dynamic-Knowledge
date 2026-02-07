@@ -6,6 +6,7 @@ Test Suite for Football Anchor Extraction
 
 import json
 import sys
+import time
 from typing import Dict, Any
 
 # 导入模块
@@ -168,8 +169,14 @@ def test_backend_extraction(block: Dict[str, Any], model: str = "llama3.2:latest
     print()
     
     try:
+        # 记录开始时间
+        start_time = time.time()
+        
         backend = OllamaBackend(model=model)
         result = backend.extract_anchors(block)
+        
+        # 计算推理时间
+        inference_time = time.time() - start_time
         
         print("✅ 提取成功")
         print()
@@ -192,6 +199,7 @@ def test_backend_extraction(block: Dict[str, Any], model: str = "llama3.2:latest
         print(f"  - Participants: {len(result.get('anchors', {}).get('participants', []))}")
         print(f"  - Temporal Anchors: {len(result.get('anchors', {}).get('temporal_anchors', []))}")
         print(f"  - Constraints: {len(result.get('anchors', {}).get('constraints', []))}")
+        print(f"  - LLM 推理时间: {inference_time:.3f} 秒")
         print()
         
         return result
@@ -245,6 +253,7 @@ def test_batch_processing(blocks: list, model: str = "llama3.2:latest"):
         state_count = 0
         need_resolver_count = 0
         error_count = 0
+        total_inference_time = 0
         
         for result in results:
             if "error" in result:
@@ -257,12 +266,17 @@ def test_batch_processing(blocks: list, model: str = "llama3.2:latest"):
                 
                 if result.get("need_resolver"):
                     need_resolver_count += 1
+                
+                # 累加推理时间
+                total_inference_time += result.get("inference_time", 0)
         
         print("📊 统计结果:")
         print(f"  - EVENT: {event_count}")
         print(f"  - STATE: {state_count}")
         print(f"  - Need Resolver: {need_resolver_count}")
         print(f"  - 错误: {error_count}")
+        print(f"  - 总推理时间: {total_inference_time:.3f} 秒")
+        print(f"  - 平均推理时间: {total_inference_time / len(results) if results else 0:.3f} 秒/block")
         print()
         
         return results
