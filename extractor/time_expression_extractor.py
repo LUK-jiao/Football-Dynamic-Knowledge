@@ -52,6 +52,7 @@ class TimeExpressionExtractor:
         time_expressions = []
         time_id_counter = 1
         seen_spans = set()  # 基于 span 去重
+        normalized_values = {}  # 用于去重：normalized -> (优先级, span, 表达式)
         
         # 1. 完整日期（1 September 2025, September 1, 2025, 2025-09-01）
         date_patterns = [
@@ -67,6 +68,19 @@ class TimeExpressionExtractor:
                 evidence = match.group(1).strip()
                 normalized = self._normalize_date(evidence)
                 if normalized:
+                    # 优先级：完整格式 > 其他格式（根据 span 长度判断）
+                    priority = len(evidence)
+                    
+                    # 检查是否有相同的 normalized 值
+                    if normalized in normalized_values:
+                        existing_priority, existing_span, _ = normalized_values[normalized]
+                        # 保留优先级更高（更完整）的表达式
+                        if priority <= existing_priority:
+                            continue
+                        else:
+                            # 移除旧的 span
+                            seen_spans.discard(existing_span)
+                    
                     time_expressions.append({
                         "time_id": f"T{time_id_counter}",
                         "evidence": evidence,
@@ -75,6 +89,7 @@ class TimeExpressionExtractor:
                         "span": span
                     })
                     seen_spans.add(span)
+                    normalized_values[normalized] = (priority, span, evidence)
                     time_id_counter += 1
         
         # 1.5 日期+月份（无年份）（on 14 January, 14 January）
@@ -94,6 +109,13 @@ class TimeExpressionExtractor:
                 full_date_str = f"{day_month} {pub_year}"
                 normalized = self._normalize_date(full_date_str)
                 if normalized:
+                    # 检查是否与已有的完整日期重复
+                    if normalized in normalized_values:
+                        existing_priority, _, _ = normalized_values[normalized]
+                        # 如果已有更完整的表达式，跳过
+                        if existing_priority > len(evidence):
+                            continue
+                    
                     time_expressions.append({
                         "time_id": f"T{time_id_counter}",
                         "evidence": evidence,
@@ -102,31 +124,47 @@ class TimeExpressionExtractor:
                         "span": span
                     })
                     seen_spans.add(span)
+                    normalized_values[normalized] = (len(evidence), span, evidence)
                     time_id_counter += 1
             except Exception:
                 # 如果处理失败，跳过这个匹配
                 pass
         
-        # 2. 年月（in September 2025, during March 2023）
-        month_year_pattern = r'\b(?:in|during)\s+((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4})\b'
-        for match in re.finditer(month_year_pattern, text, re.IGNORECASE):
-            span = (match.start(), match.end())
-            if span in seen_spans:
-                continue
-            evidence = match.group(0).strip()
-            month_year = match.group(1)
-            normalized = self._normalize_date(month_year + " 01")
-            if normalized:
-                year_month = normalized[:7]  # YYYY-MM
-                time_expressions.append({
-                    "time_id": f"T{time_id_counter}",
-                    "evidence": evidence,
-                    "normalized": year_month,
-                    "granularity": TimeGranularity.MONTH,
-                    "span": span
-                })
-                seen_spans.add(span)
-                time_id_counter += 1
+        # 2. 年月（in September 2025, during March 2023, June 2029, until March 2024）
+        month_year_patterns = [
+            # 带介词的形式
+            r'\b(?:in|during|until|by)\s+((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4})\b',
+            # 不带介词的形式（独立的月份+年份）
+            r'\b((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4})\b',
+        ]
+        
+        for pattern in month_year_patterns:
+            for match in re.finditer(pattern, text, re.IGNORECASE):
+                span = (match.start(), match.end())
+                if span in seen_spans:
+                    continue
+                evidence = match.group(0).strip()
+                month_year = match.group(1)
+                normalized = self._normalize_date(month_year + " 01")
+                if normalized:
+                    year_month = normalized[:7]  # YYYY-MM
+                    
+                    # 检查重复
+                    if year_month in normalized_values:
+                        existing_priority, _, _ = normalized_values[year_month]
+                        if len(evidence) <= existing_priority:
+                            continue
+                    
+                    time_expressions.append({
+                        "time_id": f"T{time_id_counter}",
+                        "evidence": evidence,
+                        "normalized": year_month,
+                        "granularity": TimeGranularity.MONTH,
+                        "span": span
+                    })
+                    seen_spans.add(span)
+                    normalized_values[year_month] = (len(evidence), span, evidence)
+                    time_id_counter += 1
         
         # 3. 年份（in 2021, during 2023, the 2021 season, in 2003/04）
         year_patterns = [
@@ -138,18 +176,18 @@ class TimeExpressionExtractor:
         ]
         
         # 辅助函数：检查 span 是否被已有的 year 覆盖
-        def _is_covered_by_year(span, year_spans):
+        def _is_covered_by_year(span, year_data):
             """检查 span 是否被已有 year 完全覆盖或覆盖其他 year"""
-            for s, e in year_spans:
+            for year_val, (s, e) in year_data.items():
                 # 如果被完全覆盖
                 if s <= span[0] and span[1] <= e:
                     return True
-                # 如果覆盖其他 year（自己更大）
+                # 如果覆盖其他 year（自己更大），且年份相同，则优先保留更长的
                 if span[0] <= s and e <= span[1]:
                     return True
             return False
         
-        year_spans = []  # 记录已识别的 year spans
+        year_data = {}  # 记录已识别的 year: (span_start, span_end)
         
         for pattern, fmt in year_patterns:
             for match in re.finditer(pattern, text, re.IGNORECASE):
@@ -157,12 +195,25 @@ class TimeExpressionExtractor:
                 if span in seen_spans:
                     continue
                     
-                # 检查是否与已有的 year span 有覆盖关系
-                if _is_covered_by_year(span, year_spans):
-                    continue
-                    
                 evidence = match.group(0).strip()
                 year = match.group(1)
+                
+                # 检查是否与已有的 year span 有覆盖关系
+                if _is_covered_by_year(span, year_data):
+                    continue
+                
+                # 检查相同 normalized 年份
+                if year in normalized_values:
+                    existing_priority, existing_span, _ = normalized_values[year]
+                    # 保留更详细的表达式
+                    if len(evidence) <= existing_priority:
+                        continue
+                    else:
+                        # 移除旧的
+                        seen_spans.discard(existing_span)
+                        if year in year_data:
+                            del year_data[year]
+                    
                 time_expressions.append({
                     "time_id": f"T{time_id_counter}",
                     "evidence": evidence,
@@ -171,7 +222,8 @@ class TimeExpressionExtractor:
                     "span": span
                 })
                 seen_spans.add(span)
-                year_spans.append(span)  # 记录到 year_spans
+                year_data[year] = span
+                normalized_values[year] = (len(evidence), span, evidence)
                 time_id_counter += 1
         
         # 4. 相对时间（RELATIVE）
@@ -293,12 +345,12 @@ class TimeExpressionExtractor:
             seen_spans.add(span)
             time_id_counter += 1
         
-        # 5. Duration（four-and-a-half year contract, five-year deal, in five years）
+        # 5. Duration（four-and-a-half year contract, five-year deal, in five years, for 2 months）
         # 按照从具体到宽泛的顺序定义规则
         duration_patterns = [
-            # 0. 独立的时间跨度（in five years, in 2 months）
-            r'\b(?:in|within|after|over)\s+(\d+)\s+(years?|months?|weeks?|days?)\b',
-            r'\b(?:in|within|after|over)\s+(\w+)\s+(years?|months?|weeks?|days?)\b',
+            # 0. 独立的时间跨度（in five years, in 2 months, for 2 months）
+            r'\b(?:in|within|after|over|for)\s+(\d+)\s+(years?|months?|weeks?|days?)\b',
+            r'\b(?:in|within|after|over|for)\s+(\w+)\s+(years?|months?|weeks?|days?)\b',
             
             # 1a. 复合词 + 独立的 year/month/week + contract/deal
             #     例如: "four-and-a-half year contract"
