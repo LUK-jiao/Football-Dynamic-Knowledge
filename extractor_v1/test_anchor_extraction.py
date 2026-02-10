@@ -80,62 +80,6 @@ TEST_BLOCKS = [
 # 测试函数
 # ============================================================================
 
-def test_ollama_connection(model: str = "llama3:latest"):
-    """测试 Ollama 连接"""
-    print("=" * 100)
-    print("测试 1: Ollama 连接")
-    print("=" * 100)
-    print()
-    
-    try:
-        import ollama
-        models_response = ollama.list()
-        print(f"✅ Ollama 连接成功")
-        
-        # 获取模型列表（处理不同的返回格式）
-        models_list = []
-        if hasattr(models_response, 'models'):
-            # 新版本返回对象
-            models_list = models_response.models
-        elif isinstance(models_response, dict):
-            models_list = models_response.get('models', [])
-        elif isinstance(models_response, list):
-            models_list = models_response
-        
-        print(f"可用模型数量: {len(models_list)}")
-        
-        # 检查目标模型是否存在
-        model_names = []
-        for m in models_list:
-            if hasattr(m, 'model'):
-                # 对象格式
-                model_names.append(m.model)
-            elif isinstance(m, dict):
-                model_names.append(m.get('name', m.get('model', '')))
-            else:
-                model_names.append(str(m))
-        
-        # 打印所有模型名称
-        if model_names:
-            print(f"已安装的模型: {', '.join(model_names)}")
-        
-        # 检查目标模型（支持精确匹配或部分匹配）
-        model_found = model in model_names or any(name.startswith(model.split(':')[0]) for name in model_names)
-        
-        if model_found:
-            print(f"✅ 目标模型 '{model}' 已安装")
-        else:
-            print(f"⚠️  目标模型 '{model}' 未找到")
-            return False
-        
-        return True
-        
-    except Exception as e:
-        print(f"❌ Ollama 连接失败: {str(e)}")
-        print("请确保 Ollama 服务已启动: ollama serve")
-        return False
-
-
 def test_prompt_display(block: Dict[str, Any]):
     """测试 Prompt 显示"""
     print("=" * 100)
@@ -270,15 +214,6 @@ def test_batch_processing(blocks: list, model: str = "llama3.2:latest"):
                 # 累加推理时间
                 total_inference_time += result.get("inference_time", 0)
         
-        print("📊 统计结果:")
-        print(f"  - EVENT: {event_count}")
-        print(f"  - STATE: {state_count}")
-        print(f"  - Need Resolver: {need_resolver_count}")
-        print(f"  - 错误: {error_count}")
-        print(f"  - 总推理时间: {total_inference_time:.3f} 秒")
-        print(f"  - 平均推理时间: {total_inference_time / len(results) if results else 0:.3f} 秒/block")
-        print()
-        
         return results
         
     except Exception as e:
@@ -330,19 +265,6 @@ def run_all_tests(model: str = "llama3.2:latest", skip_llm: bool = False):
     """运行所有测试"""
     print()
     print("🚀 开始运行测试套件")
-    print()
-    
-    # 测试 1: Ollama 连接
-    if not skip_llm:
-        if not test_ollama_connection(model):
-            print()
-            print("⚠️  Ollama 连接失败，跳过 LLM 相关测试")
-            print("如果要跳过 LLM 测试，请使用 --skip-llm 参数")
-            return
-        print()
-    
-    # 测试 2: Prompt 显示
-    test_prompt_display(TEST_BLOCKS[0])
     print()
     
     # 测试 3-4: Backend 和 Extractor（每个测试场景）

@@ -9,40 +9,79 @@ import json
 from typing import Dict, Any, Optional
 import ollama
 
+SYSTEM_PROMPT = """You are a football-domain information extraction agent.
+Extract structured anchors from ONE semantic block and output a COMPLETE JSON.
 
-# ============================================================================
-# System Prompt - 定义抽取规则和输出 Schema
-# ============================================================================
-
-SYSTEM_PROMPT = """Extract football anchors. Output complete JSON with all fields.
-
-Required JSON structure:
+=====================
+OUTPUT JSON SCHEMA
+=====================
 {
-  "block_id": "...", "text": "...", "source": "...", "publish_date": "...",
+  "block_id": "...",
+  "text": "...",
+  "source": "...",
+  "publish_date": "...",
   "anchors": {
-    "participants": [{"type": "Player|Club|Coach|Team|Stadium|Tournament|Referee|Other", "name": "..."}],
-    "temporal_anchors": [{"event_date": "YYYY-MM-DD", "valid_from": "YYYY-MM-DD", "valid_to": "YYYY-MM-DD"}],
-    "sources": [{"name": "...", "type": "Media|Official|Social|Other"}],
-    "constraints": [{"type": "TRANSFER_STATUS|CONTRACT_STATUS|INJURY_STATUS|ROLE_STATUS|MATCH_STATUS|SUSPENSION_STATUS", "subject": "...", "expected_state": "..."}]
+    "participants": [
+      {"type": "Player|Club|Coach|Stadium|Tournament|Referee|Other", "name": "..."}
+    ],
+    "temporal_anchors": [
+      {"event_date": "YYYY-MM-DD", "valid_from": "YYYY-MM-DD", "valid_to": "YYYY-MM-DD"}
+    ],
+    "sources": [
+      {"name": "...", "type": "Media|Official|Social|Other"}
+    ],
+    "constraints": [
+      {
+        "type": "TRANSFER_STATUS|CONTRACT_STATUS|INJURY_STATUS|MATCH_STATUS|SUSPENSION_STATUS",
+        "subject": "...",
+        "expected_state": "..."
+      }
+    ]
   },
   "fact_type": "EVENT|STATE"
 }
 
-ALL fields required (use [] if empty, except constraints ≥1):
-- participants: entities from text only, exact names
-- temporal_anchors: if time mentioned (on/in/at), format YYYY-MM-DD
-- sources: from input source field
-- constraints: ≥1 required, must be in anchors object
-- fact_type: EVENT (past tense/specific time) or STATE (present tense/ongoing)
+=====================
+CRITICAL RULES
+=====================
 
-Constraint mappings:
-Transfer→TRANSFER_STATUS:transfer_completed, Match→MATCH_STATUS:match_completed
-Contract→CONTRACT_STATUS:contract_active, Coach→ROLE_STATUS:role_active
-Injury→INJURY_STATUS:injured, Suspension→SUSPENSION_STATUS:suspended
+1️⃣ PARTICIPANTS
+- Extract ALL explicitly mentioned entities (players, clubs, teams, coaches, etc.).
+- Convert nicknames to official names (e.g. "the Gunners" → "Arsenal").
+- Team / club nicknames MUST be type "Team" or "Club", NEVER "Player".
+- Do NOT invent entities or use external knowledge.
 
-Copy block_id, text, source, publish_date unchanged. No external knowledge.
+2️⃣ CONSTRAINTS (STRICT)
+- Extract ONLY facts EXPLICITLY stated in the text. NO inference.
+- Each constraint MUST satisfy ALL of the following:
+  - subject is NOT empty
+  - subject EXACTLY matches a name in participants
+  - subject is NOT a generic word (❌ "match", "transfer", "semi-final")
+- If text states a role (e.g. "is manager/coach"):
+  → use CONTRACT_STATUS or ROLE-equivalent constraint with explicit wording only.
+
+3️⃣ TEMPORAL ANCHORS
+- Extract ONLY explicit dates/times from text.
+- Format strictly as YYYY-MM-DD.
+- Do NOT use publish_date as event time.
+
+4️⃣ SOURCES
+- Always generate from input `source` field.
+
+5️⃣ FACT TYPE
+- EVENT: completed or scheduled factual events (signed, agreed, won, played).
+- STATE: time-dependent conditions (contract, injury, role, suspension).
+
+=====================
+HARD REQUIREMENTS
+=====================
+- Copy block_id, text, source, publish_date EXACTLY as input.
+- ALL top-level fields MUST exist.
+- Use [] for empty arrays.
+- constraints array MUST contain ≥1 item.
+- NEVER hallucinate facts, entities, dates, or states.
+- Output JSON ONLY. No explanations.
 """
-
 
 # ============================================================================
 # Developer Prompt - 针对单个 block 的动态提示
@@ -135,11 +174,11 @@ class OllamaBackend:
                 model=self.model,
                 messages=messages,
                 options={
-                    "temperature": 0.1,  # 低温度保证输出稳定
-                    "num_predict": 1500,  # 减少最大 token 数（原 2000）
-                    "num_ctx": 4096,      # 上下文窗口（足够处理我们的 prompt）
-                    "top_p": 0.9,         # nucleus sampling
-                    "repeat_penalty": 1.1 # 减少重复
+                    "temperature": 0.05,   # 极低温度，保证输出一致性和稳定性
+                    "num_predict": 1500,   # 最大 token 数
+                    "num_ctx": 4096,       # 上下文窗口
+                    "top_p": 0.85,         # nucleus sampling，更保守的采样
+                    "repeat_penalty": 1.15 # 更强的重复惩罚
                 }
             )
             
