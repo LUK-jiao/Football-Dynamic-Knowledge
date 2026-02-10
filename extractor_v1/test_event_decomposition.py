@@ -35,6 +35,7 @@ def print_events(result: dict, test_name: str):
         print(f"  Parent: {event['parent_event_id']}")
         print(f"  Is Sub-Event: {event['is_sub_event']}")
         print(f"  Description: {event['event_description']}")
+        print(f"  Block Text: {event['block_text']}")
         print(f"  Inference Time: {event.get('inference_time', 0):.2f}s")
         print()
 
@@ -100,14 +101,14 @@ def test_complex_block():
     """测试复杂语义块（来自真实数据）"""
     block = {
         "block_id": "003",
-        "text": "After bossing much of the quarter-final against Palace and creating the majority of big chances, Arteta's men finally found their breakthrough, which came from a corner in the 80th minute. A well-placed delivery into the box from Bukayo Saka found the head of Riccardo Calafiori and eventually went into the net off Palace centre-back Lacroix. The unfortunate own goal did not dampen Palace's spirits as they went in search of an equaliser. When it finally did arrive, they had club captain Marc Guehi to thank. The England international was the first to react to a knock-on from Jefferson Lerma in the fifth minute of stoppage time.",
+        "text": "After bossing much of the quarter-final against Palace and creating the majority of big chances, Arteta's men finally found their breakthrough, which came from a corner in the 80th minute. A well-placed delivery into the box from Bukayo Saka found the head of Riccardo Calafiori and eventually went into the net off Palace centre-back Lacroix. The unfortunate own goal did not dampen Palace's spirits as they went in search of an equaliser. When it finally did arrive, they had club captain Marc Guehi to thank. The England international was the first to react to a knock-on from Jefferson Lerma in the fifth minute of stoppage time. A fascinating penalty shoot-out then ensued, with both sides delivering spectacular finishes to take the score to 8-7. When the own-goal scorer Lacroix stepped up to take his kick, Arsenal keeper Kepa read its direction and made the save to ensure the Gunners remain on course for their first Wembley appearance in five years.",
         "source": "BBC Sport",
         "publish_date": "2025-01-15"
     }
     
     decomposer = EventDecomposer(model="llama3:latest")
     result = decomposer.decompose(block)
-    
+    print(f"\nOriginal text: \n {block['text']}")
     print_events(result, "Complex Block - Match Narrative with Multiple Goals")
     
     return result
@@ -145,10 +146,7 @@ def main():
     print("="*80)
     
     tests = [
-        ("Single Event", test_single_event),
-        ("Multiple Events (Parent-Child)", test_multiple_events),
-        ("Complex Block", test_complex_block),
-        ("Independent Events", test_independent_events),
+        ("Complex Block", test_complex_block)
     ]
     
     results = []
