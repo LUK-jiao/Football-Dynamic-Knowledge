@@ -96,6 +96,197 @@ Output JSON (constraints in anchors, fact_type required):
 
 
 # ============================================================================
+# Event Decomposition Prompts (事件分解层)
+# ============================================================================
+
+EVENT_DECOMPOSITION_SYSTEM_PROMPT = """You are an event decomposition agent for football news.
+
+Your ONLY job is to split a semantic block into 1-N event units.
+
+=====================
+OUTPUT JSON SCHEMA
+=====================
+{
+  "events": [
+    {
+      "event_id": "string",
+      "parent_event_id": "string | null",
+      "is_sub_event": "boolean",
+      "event_description": "string",
+      "block_text": "string",
+      "source": "string",
+      "publish_date": "string"
+    }
+  ]
+}
+
+=====================
+CRITICAL RULES
+=====================
+
+1️⃣ EVENT SPLITTING
+- One block can produce 1-N events.
+- Each event must be semantically self-contained.
+- Split only when there are clearly distinct actions/facts.
+- When uncertain → DO NOT split (conservative strategy).
+
+2️⃣ PARENT-CHILD RELATIONSHIP
+- Main event: is_sub_event = false, parent_event_id = null
+- Sub-event: is_sub_event = true, parent_event_id = "<parent_event_id>"
+- Sub-events are those that:
+  - Are causal consequences of the main event
+  - Are decisive moments that determine the main event
+  - Provide time details or key actions for the main event
+- If no clear hierarchy → multiple main events (all is_sub_event = false)
+
+3️⃣ EVENT_DESCRIPTION (One-sentence summary)
+- Describe WHAT happened in ONE sentence.
+- Must be a clear, verifiable action.
+- ✓ Good: "De Ligt agrees to join Manchester United"
+- ✓ Good: "Arsenal defeat Crystal Palace on penalties"
+- ✗ Bad: "Transfer completed on 1 September" (adds interpretation)
+- ✗ Bad: "Arsenal reach semi-finals after dramatic shootout" (adds narrative)
+
+4️⃣ BLOCK_TEXT (MUST preserve original)
+- NEVER modify, summarize, or rewrite the original text.
+- Copy the COMPLETE original text for each event.
+- All events can share the same block_text.
+
+5️⃣ EVENT_ID FORMAT
+- Main event: "<block_id>-1", "<block_id>-2", etc.
+- Sub-event: "<parent_event_id>-1", "<parent_event_id>-2", etc.
+- Example: block_id="001" → main="001-1", sub="001-1-1"
+
+=====================
+FORBIDDEN ACTIONS
+=====================
+❌ DO NOT extract dates or times (next module handles this)
+❌ DO NOT judge states (e.g., "transfer_completed", "injured")
+❌ DO NOT generate constraints
+❌ DO NOT infer facts not in text
+❌ DO NOT modify block_text in any way
+
+=====================
+CONSERVATIVE STRATEGY
+=====================
+- Not sure if it's a separate event? → Don't split
+- Can't write clear event_description? → Don't create event
+- Better to miss than to create wrong events
+
+=====================
+EXAMPLES
+=====================
+
+Example 1: Single Event
+Input:
+{
+  "block_id": "001",
+  "text": "De Ligt has agreed to join Manchester United from Bayern Munich on 1 September 2025.",
+  "source": "BBC",
+  "publish_date": "2025-08-23"
+}
+
+Output:
+{
+  "events": [
+    {
+      "event_id": "001-1",
+      "parent_event_id": null,
+      "is_sub_event": false,
+      "event_description": "De Ligt agrees to join Manchester United from Bayern Munich",
+      "block_text": "De Ligt has agreed to join Manchester United from Bayern Munich on 1 September 2025.",
+      "source": "BBC",
+      "publish_date": "2025-08-23"
+    }
+  ]
+}
+
+Example 2: Multiple Independent Events
+Input:
+{
+  "block_id": "002",
+  "text": "Arsenal won 2-1 against Chelsea. Saka scored the winning goal in the 85th minute.",
+  "source": "Sky Sports",
+  "publish_date": "2025-01-15"
+}
+
+Output:
+{
+  "events": [
+    {
+      "event_id": "002-1",
+      "parent_event_id": null,
+      "is_sub_event": false,
+      "event_description": "Arsenal won 2-1 against Chelsea",
+      "block_text": "Arsenal won 2-1 against Chelsea. Saka scored the winning goal in the 85th minute.",
+      "source": "Sky Sports",
+      "publish_date": "2025-01-15"
+    },
+    {
+      "event_id": "002-2",
+      "parent_event_id": "002-1",
+      "is_sub_event": true,
+      "event_description": "Saka scored the winning goal",
+      "block_text": "Arsenal won 2-1 against Chelsea. Saka scored the winning goal in the 85th minute.",
+      "source": "Sky Sports",
+      "publish_date": "2025-01-15"
+    }
+  ]
+}
+
+Example 3: No Clear Hierarchy
+Input:
+{
+  "block_id": "003",
+  "text": "Liverpool signed Salah. Manchester City acquired Haaland.",
+  "source": "ESPN",
+  "publish_date": "2025-01-10"
+}
+
+Output:
+{
+  "events": [
+    {
+      "event_id": "003-1",
+      "parent_event_id": null,
+      "is_sub_event": false,
+      "event_description": "Liverpool signed Salah",
+      "block_text": "Liverpool signed Salah. Manchester City acquired Haaland.",
+      "source": "ESPN",
+      "publish_date": "2025-01-10"
+    },
+    {
+      "event_id": "003-2",
+      "parent_event_id": null,
+      "is_sub_event": false,
+      "event_description": "Manchester City acquired Haaland",
+      "block_text": "Liverpool signed Salah. Manchester City acquired Haaland.",
+      "source": "ESPN",
+      "publish_date": "2025-01-10"
+    }
+  ]
+}
+
+=====================
+REMEMBER
+=====================
+- You are an INDEX layer, not a FACT layer.
+- All verifiable facts must come from block_text.
+- Next module will extract times, states, and constraints.
+- Output ONLY valid JSON, no explanations.
+"""
+
+EVENT_DECOMPOSITION_DEVELOPER_PROMPT = """Input:
+Block ID: {block_id}
+Source: {source}
+Publish Date: {publish_date}
+Text: {text}
+
+Output JSON (array of events):
+"""
+
+
+# ============================================================================
 # Ollama Backend Class
 # ============================================================================
 
@@ -266,6 +457,82 @@ class OllamaBackend:
         result = self._parse_json(raw_response)
         
         # 4. 直接返回，不做任何后处理
+        return result
+    
+    def decompose_events(self, block: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        将语义块分解为事件单元（Event Decomposition Layer）
+        
+        Args:
+            block: 输入的语义块，必须包含：
+                - block_id: 唯一标识
+                - text: 原始文本
+                - source: 信息来源
+                - publish_date: 发布日期
+        
+        Returns:
+            包含事件列表的结果 dict：
+            {
+                "events": [
+                    {
+                        "event_id": "...",
+                        "parent_event_id": "..." | null,
+                        "is_sub_event": true | false,
+                        "event_description": "...",
+                        "block_text": "...",
+                        "source": "...",
+                        "publish_date": "..."
+                    }
+                ]
+            }
+        
+        Raises:
+            ValueError: 输入格式不正确或解析失败
+        """
+        # 验证输入
+        required_fields = ["block_id", "text", "source", "publish_date"]
+        for field in required_fields:
+            if field not in block:
+                raise ValueError(f"Block 缺少必填字段: {field}")
+        
+        # 1. 构建事件分解消息
+        system_message = {
+            "role": "system",
+            "content": EVENT_DECOMPOSITION_SYSTEM_PROMPT
+        }
+        
+        developer_content = EVENT_DECOMPOSITION_DEVELOPER_PROMPT.format(
+            block_id=block.get("block_id", "N/A"),
+            source=block.get("source", "N/A"),
+            publish_date=block.get("publish_date", "N/A"),
+            text=block.get("text", "")
+        )
+        
+        developer_message = {
+            "role": "user",
+            "content": developer_content
+        }
+        
+        messages = [system_message, developer_message]
+        
+        # 2. 调用 LLM
+        raw_response = self._call_ollama(messages)
+        
+        # 3. 解析 JSON
+        result = self._parse_json(raw_response)
+        
+        # 4. 验证输出格式
+        if "events" not in result or not isinstance(result["events"], list):
+            raise ValueError("Event decomposition output must contain 'events' array")
+        
+        # 5. 验证每个 event 的必填字段
+        required_event_fields = ["event_id", "parent_event_id", "is_sub_event", 
+                                 "event_description", "block_text", "source", "publish_date"]
+        for event in result["events"]:
+            for field in required_event_fields:
+                if field not in event:
+                    raise ValueError(f"Event missing required field: {field}")
+        
         return result
 
 

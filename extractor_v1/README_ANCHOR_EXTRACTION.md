@@ -2,11 +2,12 @@
 
 使用 Ollama 本地大模型从足球新闻语义块中抽取结构化事实锚点，并自动判定 **EVENT vs STATE**。
 
-## 📋 总体目标
+## 📋 总体架构
 
-你是一个足球领域事实抽取与语义锚点识别专家 Agent。
+系统采用两层架构：
 
-从单条新闻语义块中，抽取结构化"事实锚点（anchors）"，并准确判定该事实是 **EVENT（历史事件）** 还是 **STATE（状态事实）**。
+1. **事件分解层（Event Decomposition）**：将语义块拆分为 1-N 个事件单元
+2. **锚点抽取层（Anchor Extraction）**：从事件单元中抽取结构化锚点
 
 **质量优先级：** 正确性 > 一致性 > 完整性 > 覆盖率
 
@@ -18,22 +19,125 @@
 
 ```
 extractor_v1/
-├── ollama_backend.py            # Ollama 后端（Prompt + LLM 调用）
-├── anchor_extractor.py          # 业务调用层（纯透传）
-├── test_anchor_extraction.py    # 综合测试套件
-├── example_usage.py             # 使用示例
-├── __init__.py                  # Python 包初始化
-└── README_ANCHOR_EXTRACTION.md  # 本文档
+├── ollama_backend.py               # Ollama 后端（Prompt + LLM 调用）
+├── event_decomposition.py          # 事件分解层
+├── anchor_extractor.py             # 锚点抽取层（业务调用）
+├── test_event_decomposition.py     # 事件分解测试
+├── test_anchor_extraction.py       # 锚点抽取测试
+├── integrate_test_extractor.py     # 端到端集成测试
+├── example_usage.py                # 使用示例
+├── __init__.py                     # Python 包初始化
+└── README_ANCHOR_EXTRACTION.md     # 本文档
 ```
 
 ---
 
-## 📥 输入格式
+## 🔄 数据流
+
+```
+语义块 (Semantic Block)
+    ↓
+[事件分解层] event_decomposition.py
+    ↓
+事件单元 (Event Units)
+    ↓
+[锚点抽取层] anchor_extractor.py
+    ↓
+结构化锚点 (Structured Anchors)
+```
+
+---
+
+## 📥 第一层：事件分解（Event Decomposition）
+
+### 输入格式
 
 ```json
 {
   "block_id": "001",
-  "text": "De Ligt has agreed to join Manchester United from Bayern Munich on 1 September 2025.",
+  "text": "Arsenal won 2-1 against Chelsea. Saka scored the winning goal in the 85th minute.",
+  "source": "BBC",
+  "publish_date": "2025-08-23"
+}
+```
+
+### 输出格式
+
+```json
+{
+  "events": [
+    {
+      "event_id": "001-1",
+      "parent_event_id": null,
+      "is_sub_event": false,
+      "event_description": "Arsenal won 2-1 against Chelsea",
+      "block_text": "Arsenal won 2-1 against Chelsea. Saka scored the winning goal in the 85th minute.",
+      "source": "BBC",
+      "publish_date": "2025-08-23",
+      "inference_time": 3.2
+    },
+    {
+      "event_id": "001-2",
+      "parent_event_id": "001-1",
+      "is_sub_event": true,
+      "event_description": "Saka scored the winning goal",
+      "block_text": "Arsenal won 2-1 against Chelsea. Saka scored the winning goal in the 85th minute.",
+      "source": "BBC",
+      "publish_date": "2025-08-23",
+      "inference_time": 3.2
+    }
+  ]
+}
+```
+
+### 职责范围
+
+✅ **允许做：**
+- 事件拆分：一个 block 可生成多个 event
+- 父子关系标注：主事件 vs 子事件
+- 事件语义压缩：用一句话概括"发生了什么"
+
+❌ **禁止做：**
+- 时间抽取或标准化
+- 状态判断（如 transfer_completed / injured）
+- 约束生成（constraints）
+- 事实补全或常识推断
+- 改写、裁剪、总结 block_text
+
+### 使用示例
+
+```python
+from extractor_v1.event_decomposition import EventDecomposer
+
+decomposer = EventDecomposer(model="llama3:latest")
+
+block = {
+    "block_id": "001",
+    "text": "Arsenal won 2-1 against Chelsea. Saka scored the winning goal.",
+    "source": "BBC",
+    "publish_date": "2025-01-15"
+}
+
+result = decomposer.decompose(block)
+
+for event in result["events"]:
+    print(f"Event: {event['event_description']}")
+    print(f"  Is Sub-Event: {event['is_sub_event']}")
+```
+
+---
+
+## 📥 第二层：锚点抽取（Anchor Extraction）
+
+### 输入格式（来自事件分解层）
+
+```json
+{
+  "event_id": "001-1",
+  "parent_event_id": null,
+  "is_sub_event": false,
+  "event_description": "De Ligt agrees to join Manchester United from Bayern Munich",
+  "block_text": "De Ligt has agreed to join Manchester United from Bayern Munich on 1 September 2025.",
   "source": "BBC",
   "publish_date": "2025-08-23"
 }
@@ -41,21 +145,28 @@ extractor_v1/
 
 | 字段 | 说明 |
 |------|------|
-| `block_id` | 语义块唯一 ID（不可修改） |
-| `text` | 原始文本（唯一事实来源） |
+| `event_id` | 事件唯一 ID |
+| `parent_event_id` | 父事件 ID（主事件为 null） |
+| `is_sub_event` | 是否为子事件 |
+| `event_description` | 事件描述（一句话） |
+| `block_text` | 原始文本（唯一事实来源） |
 | `source` | 新闻来源 |
 | `publish_date` | 发布日期（⚠️ **不是事件时间**） |
 
 ---
 
-## 📤 输出格式
+## 📤 最终输出格式
 
 ```json
 {
-  "block_id": "001",
-  "text": "De Ligt has agreed to join Manchester United...",
+  "event_id": "001-1",
+  "parent_event_id": null,
+  "is_sub_event": false,
+  "event_description": "De Ligt agrees to join Manchester United from Bayern Munich",
+  "block_text": "De Ligt has agreed to join Manchester United...",
   "source": "BBC",
   "publish_date": "2025-08-23",
+
   "anchors": {
     "participants": [
       {"type": "Player", "name": "De Ligt"},
@@ -66,7 +177,7 @@ extractor_v1/
       {
         "event_date": "2025-09-01",
         "valid_from": "2025-09-01",
-        "valid_to": "2025-09-01"
+        "valid_to": null
       }
     ],
     "sources": [
@@ -74,15 +185,17 @@ extractor_v1/
     ],
     "constraints": [
       {
-        "type": "TRANSFER_STATUS",
+        "type": "CONTRACT_STATUS",
         "subject": "De Ligt",
-        "expected_state": "transfer_possible"
+        "expected_state": "agreed"
       }
     ]
   },
+
   "fact_type": "EVENT",
-  "need_resolver": false
+  "inference_time": 8.5
 }
+
 ```
 
 ---
@@ -295,7 +408,48 @@ ollama pull llama3.2:latest
 pip install ollama
 ```
 
-### 3. 基本使用
+### 3. 完整流程示例
+
+```python
+from extractor_v1.event_decomposition import EventDecomposer
+from extractor_v1.anchor_extractor import AnchorExtractor
+
+# 准备输入 block
+block = {
+    "block_id": "B1",
+    "source": "BBC Sport",
+    "publish_date": "2025-01-15",
+    "text": "Arsenal won 2-1 against Chelsea. Saka scored the winning goal in the 85th minute."
+}
+
+# 第一步：事件分解
+decomposer = EventDecomposer(model="llama3:latest")
+decomposition_result = decomposer.decompose(block)
+
+print(f"Generated {len(decomposition_result['events'])} events")
+
+# 第二步：对每个事件进行锚点抽取
+extractor = AnchorExtractor(model="llama3:latest")
+
+for event in decomposition_result['events']:
+    # 将事件转换为 block 格式
+    event_block = {
+        "block_id": event['event_id'],
+        "text": event['block_text'],
+        "source": event['source'],
+        "publish_date": event['publish_date']
+    }
+    
+    # 抽取锚点
+    result = extractor.extract_anchors(event_block)
+    
+    print(f"\nEvent: {event['event_description']}")
+    print(f"  Participants: {[p['name'] for p in result['anchors']['participants']]}")
+    print(f"  Fact Type: {result['fact_type']}")
+    print(f"  Inference Time: {result['inference_time']:.2f}s")
+```
+
+### 4. 仅使用锚点抽取（不分解事件）
 
 ```python
 from extractor_v1.anchor_extractor import AnchorExtractor
