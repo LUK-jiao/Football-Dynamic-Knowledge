@@ -52,6 +52,38 @@ class SentenceSplitter:
             warnings.warn("spaCy not installed. Install with: pip install spacy")
             self.nlp = None
     
+    def _separate_quote_endings(self, sentences: List[str]) -> List[str]:
+        """
+        Separate sentences where a quote ending is mixed with a new sentence.
+        
+        Example input: '" Kevin De Bruyne has signed...'
+        Example output: ['"', 'Kevin De Bruyne has signed...']
+        
+        Args:
+            sentences: Input sentences
+            
+        Returns:
+            Sentences with quote endings separated
+        """
+        separated = []
+        
+        for sent in sentences:
+            # Check if sentence starts with just a quote mark followed by content
+            # Pattern: ^\s*["']\s+[A-Z] (quote mark, whitespace, then capital letter)
+            match = re.match(r'^(\s*["\'])\s+([A-Z].*)', sent)
+            if match:
+                # Split into quote ending and new sentence
+                quote_part = match.group(1).strip()
+                content_part = match.group(2).strip()
+                if content_part:  # Only split if there's actual content
+                    separated.append(quote_part)
+                    separated.append(content_part)
+                    continue
+            
+            separated.append(sent)
+        
+        return separated
+    
     def _aggregate_quotes(self, sentences: List[str]) -> List[str]:
         """
         Aggregate quoted sentences with their attribution.
@@ -125,35 +157,39 @@ class SentenceSplitter:
                         else next_sent.lstrip().startswith("'")
                     )
                     
-                    # Check if it ends with closing quote
-                    ends_with_quote = (
-                        next_sent.rstrip().endswith('"') if using_double 
-                        else next_sent.rstrip().endswith("'")
-                    )
+                    # Check if it ends with closing quote followed by optional punctuation
+                    # Look for patterns like: "  or ."  or !"  or ?"
+                    ends_with_quote = False
+                    if using_double:
+                        # Match quote at end, possibly with whitespace/newline after
+                        if '"' in next_sent:
+                            # Find the last quote
+                            last_quote_pos = next_sent.rfind('"')
+                            # Everything after the quote should be whitespace/punctuation
+                            after_quote = next_sent[last_quote_pos+1:].strip()
+                            # If nothing or only punctuation after quote, it's a closing quote
+                            ends_with_quote = not after_quote or all(c in '.!?,;: \n\t' for c in after_quote)
+                    else:
+                        if "'" in next_sent:
+                            last_quote_pos = next_sent.rfind("'")
+                            after_quote = next_sent[last_quote_pos+1:].strip()
+                            ends_with_quote = not after_quote or all(c in '.!?,;: \n\t' for c in after_quote)
                     
-                    # Always merge if:
-                    # 1. Starts with quote (explicit continuation from journalism style)
-                    # 2. Inside quote and not a new attribution
-                    if starts_with_quote or in_quote:
+                    # Merge if it's part of the quote
+                    if starts_with_quote or (in_quote and not ends_with_quote):
                         merged.append(next_sent)
                         i += 1
                         
-                        # If ends with closing quote and next doesn't start with quote, we're done
+                        # Check if we should stop
                         if ends_with_quote:
-                            if i < len(sentences):
-                                peek_next = sentences[i]
-                                peek_starts_with_quote = (
-                                    peek_next.lstrip().startswith('"') if using_double 
-                                    else peek_next.lstrip().startswith("'")
-                                )
-                                # If next doesn't start with quote and doesn't have colon (not continuation)
-                                if not peek_starts_with_quote:
-                                    in_quote = False
-                                    break
-                            else:
-                                # No more sentences, we're done
-                                in_quote = False
-                                break
+                            in_quote = False
+                            break
+                    elif ends_with_quote:
+                        # Last sentence of the quote
+                        merged.append(next_sent)
+                        i += 1
+                        in_quote = False
+                        break
                     else:
                         # Not part of quote anymore
                         break
@@ -188,10 +224,13 @@ class SentenceSplitter:
         doc = self.nlp(text.strip())
         sentences = [sent.text.strip() for sent in doc.sents if sent.text.strip()]
         
-        # Step 2: Aggregate quotes (merge quoted sentences back to their attribution)
+        # Step 2: Separate mixed quote endings (e.g., '" New sentence' -> ['"', 'New sentence'])
+        sentences = self._separate_quote_endings(sentences)
+        
+        # Step 3: Aggregate quotes (merge quoted sentences back to their attribution)
         sentences = self._aggregate_quotes(sentences)
         
-        # Step 3: Basic cleaning
+        # Step 4: Basic cleaning
         cleaned = self._clean(sentences)
         
         return cleaned

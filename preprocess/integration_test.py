@@ -63,7 +63,7 @@ def test_full_pipeline():
     # Step 2: Semantic chunking with v2 system
     print("\n[Step 2] Semantic Chunking with Ollama v2 (Continuous Scoring)...")
     
-    backend = OllamaBackend(model="gemma3:12b", timeout=30, temperature=0.05)
+    backend = OllamaBackend(model="gemma3:12b", timeout=30, temperature=0.5)
     
     config = ChunkerConfig(
         granularity=GranularityMode.MEDIUM,
