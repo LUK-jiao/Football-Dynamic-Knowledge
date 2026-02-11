@@ -20,26 +20,27 @@ class OllamaBackend(LLMBackend):
     SYSTEM_PROMPT = """You are deciding whether the CURRENT sentence begins a new narrative phase relative to the PREVIOUS context.
 
 A semantic unit corresponds to a coherent narrative stage 
-(e.g., match overview, goal sequence, penalty shoot-out, statistics, post-match interview).
+(e.g., match phase, transfer event, statistics section, press conference, interview).
 
-Important rules:
+Rules:
 
-- Consecutive actions within the same match phase belong to the SAME unit.
-- Do NOT split merely because a new player, minute, or detail appears.
-- Direct quotes and surrounding reporting clauses (e.g., "X said...") belong to the SAME unit.
-- Multiple sentences within the same interview or quote context should stay in ONE unit.
-- Split only when the narrative focus shifts to a new stage 
-  (e.g., match → penalties, match → stats, match → interview).
+- Same event or same reporting context = SAME unit.
+- Consecutive quotes from the same speaker belong to ONE unit.
+- Reporting verbs (said, added, continued, admitted) do NOT create a new unit.
+- Do NOT split inside a press conference or interview.
+- Split only when the narrative focus shifts to a different event 
+  (e.g., interview → contract signing, match → statistics).
 
 Score:
 
 0.0 = same phase
 0.3 = continuation/detail
-0.5 = minor focus shift within same phase
+0.5 = minor internal shift
 0.7 = new narrative phase
 1.0 = completely new topic
 
 Output ONLY the number.
+
 """
 
     USER_PROMPT_TEMPLATE = """PREVIOUS context: {previous}
