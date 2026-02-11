@@ -50,8 +50,8 @@ class ChunkerConfig:
     break_threshold: Optional[float] = None
     max_sentences_per_chunk: int = 5
     context_window: int = 2
-    enable_structural_rules: bool = True
-    enable_orphan_merge: bool = True
+    enable_structural_rules: bool = False
+    enable_orphan_merge: bool = False
     log_scores: bool = False
     
     def __post_init__(self):
@@ -319,7 +319,7 @@ class SemanticChunker:
             # Log if enabled
             if self.config.log_scores:
                 self.logger.info(
-                    f"Sentence {i}: score={scoring_result.score:.2f} "
+                    f"Sentence {i+1}: score={scoring_result.score:.2f} "
                     f"(threshold={self.config.break_threshold:.2f})"
                 )
             
@@ -417,16 +417,8 @@ class SemanticChunker:
         
         if re.search(r'(said|told|stated|commented)', text):
             return "quotes"
-        if any(marker in text for marker in ["Overall", "This was", "Statistics"]):
-            return "statistics"
-        if any(marker in text for marker in ["will face", "semi-final", "next round"]):
-            return "future_fixture"
-        if re.search(r'penalty|penalties|shoot-?out', text, re.IGNORECASE):
-            return "penalty_shootout"
-        if re.search(r'scored?|goal', text, re.IGNORECASE):
-            return "goal_sequence"
         
-        return "match_narrative"
+        return "non_quotes"
     
     def get_stats(self) -> Dict:
         """Get chunking statistics."""

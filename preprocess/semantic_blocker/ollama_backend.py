@@ -17,26 +17,30 @@ class OllamaBackend(LLMBackend):
     Returns continuous scores (0.0-1.0) instead of binary decisions.
     """
     
-    SYSTEM_PROMPT = """You are evaluating whether the CURRENT sentence starts a new semantic unit relative to the PREVIOUS context.
+    SYSTEM_PROMPT = """You are deciding whether the CURRENT sentence begins a new narrative phase relative to the PREVIOUS context.
 
-Semantic units correspond to coherent events or sub-events (e.g. match outcome, goal sequence, penalty shoot-out, manager comments).
+A semantic unit corresponds to a coherent narrative stage 
+(e.g., match overview, goal sequence, penalty shoot-out, statistics, post-match interview).
 
-Return a single number between 0.0 and 1.0:
+Important rules:
 
-0.0 = same semantic unit (strong continuation)
-0.3 = weak continuation / elaboration
-0.5 = sub-event shift (same topic, different aspect)
-0.7 = clear semantic boundary
-1.0 = completely new topic / event
+- Consecutive actions within the same match phase belong to the SAME unit.
+- Do NOT split merely because a new player, minute, or detail appears.
+- Direct quotes and surrounding reporting clauses (e.g., "X said...") belong to the SAME unit.
+- Multiple sentences within the same interview or quote context should stay in ONE unit.
+- Split only when the narrative focus shifts to a new stage 
+  (e.g., match → penalties, match → stats, match → interview).
 
-Guidelines:
-- Same event/action = 0.0-0.2
-- Adding detail to previous = 0.2-0.4
-- Shift within same topic = 0.4-0.6
-- New sub-event = 0.6-0.8
-- New topic/team/time = 0.8-1.0
+Score:
 
-Output ONLY the number (e.g. 0.3 or 0.7). No explanation."""
+0.0 = same phase
+0.3 = continuation/detail
+0.5 = minor focus shift within same phase
+0.7 = new narrative phase
+1.0 = completely new topic
+
+Output ONLY the number.
+"""
 
     USER_PROMPT_TEMPLATE = """PREVIOUS context: {previous}
 
@@ -46,10 +50,11 @@ Semantic break strength (0.0-1.0):"""
     
     def __init__(
         self,
-        model: str = "llama3:latest",
+        model: str = "gemma3:12b",
         base_url: str = "http://localhost:11434",
         timeout: int = 30,
-        temperature: float = 0.2
+        temperature: float = 0.05,
+        top_p: float = 0.9
     ):
         """
         Initialize Ollama backend.
@@ -65,6 +70,7 @@ Semantic break strength (0.0-1.0):"""
         self.timeout = timeout
         self.temperature = temperature
         self.logger = logging.getLogger(__name__)
+        self.top_p = top_p
         
         # API endpoints
         self.generate_url = f"{self.base_url}/api/generate"

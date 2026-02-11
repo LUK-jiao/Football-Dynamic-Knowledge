@@ -34,7 +34,7 @@ python -m spacy download en_core_web_sm
 
 # Ensure Ollama is running
 ollama serve
-ollama pull llama3:latest
+ollama pull gemma3:12b
 ```
 
 ### Basic Usage
@@ -55,7 +55,7 @@ sentences = splitter.split(text)
 # Result: ["Arsenal won 2-1.", "Saka scored the winner.", ...]
 
 # Stage 2: Chunk semantically
-backend = OllamaBackend(model="llama3:latest")
+backend = OllamaBackend(model="gemma3:12b")
 chunks = semantic_chunk(sentences, backend)
 # Result: [["Arsenal won 2-1.", "Saka scored the winner."], [...]]
 ```

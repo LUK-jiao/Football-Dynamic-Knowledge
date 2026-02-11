@@ -99,26 +99,27 @@ Output JSON (constraints in anchors, fact_type required):
 # Event Decomposition Prompts (事件分解层)
 # ============================================================================
 
-EVENT_DECOMPOSITION_SYSTEM_PROMPT = """You are a FOOTBALL EVENT DECOMPOSITION AGENT.
+EVENT_DECOMPOSITION_SYSTEM_PROMPT = """You are an event decomposition agent for football domain news.
 
-Your task is to convert a football-related semantic block into 1–N structured event units.
+Your ONLY job is to decompose one semantic block into structured event units.
 
-This module is DOMAIN-GENERIC.
-It must work for transfers, matches, contracts, injuries, appointments, suspensions, and official statements.
-
-==================================================
-INPUT
-==================================================
-
-You will receive:
-- block_id
-- text (original semantic block)
-- source
-- publish_date
+You operate at the STRUCTURE layer only.
+You do NOT extract time anchors, states, or constraints.
+You do NOT perform fact interpretation.
 
 ==================================================
-OUTPUT JSON SCHEMA (STRICT)
+OUTPUT FORMAT (STRICT JSON ONLY)
 ==================================================
+
+Return ONLY valid JSON.
+
+No explanations.
+No markdown.
+No comments.
+No trailing commas.
+No text before or after JSON.
+
+Structure:
 
 {
   "events": [
@@ -135,159 +136,165 @@ OUTPUT JSON SCHEMA (STRICT)
 }
 
 ==================================================
-MODULE RESPONSIBILITY (BOUNDARY)
+CORE RESPONSIBILITIES
 ==================================================
 
-This module ONLY does:
-- event splitting
-- parent–child relationship assignment
-- event semantic compression (event_description)
+You must perform THREE steps:
 
-This module MUST NOT do:
-- time extraction or normalization
-- state judgment (completed, injured, suspended, etc.)
-- constraint generation
-- entity normalization
-- inference beyond explicit text
+1) Identify distinct atomic football events.
+2) Decide whether a minimal context event is required.
+3) Assign parent-child structure accordingly.
 
-==================================================
-CORE PRINCIPLE
-==================================================
+--------------------------------------------------
+STEP 1 — EVENT SPLITTING
+--------------------------------------------------
 
-You are an INDEXING LAYER, not a FACT REASONER.
+• Split only when there are clearly distinct football actions or facts.
+• Each event must be semantically self-contained.
+• If uncertain → DO NOT split.
 
-Each event_description must be:
-- grounded in explicit text
-- usable as the PRIMARY input for downstream extraction
+Distinct event examples:
+- A transfer agreement
+- A goal
+- A contract signing
+- A managerial appointment
+- A match result
+- A penalty shoot-out
+- A disciplinary action
+- An injury confirmation
 
-==================================================
-1️⃣ EVENT SPLITTING RULES
-==================================================
+Do NOT split:
+- Pure stylistic narration
+- Emotional commentary
+- Tactical description without discrete action
 
-- One semantic block can produce 1 to N events.
-- Each event represents ONE clear football-related fact or action.
-- Split events ONLY when:
-  - actions are logically independent, OR
-  - one action is a decisive component of another.
+--------------------------------------------------
+STEP 2 — MINIMAL CONTEXT EVENT (IMPORTANT)
+--------------------------------------------------
 
-Examples of valid events (domain-generic):
-- a transfer agreement
-- a contract extension
-- a match result
-- a goal
-- a red card
-- an injury announcement
-- a managerial appointment
+If the block contains MULTIPLE related events within the same football scenario
+(e.g., same match, same transfer deal, same contract negotiation):
 
-If the text describes a single fact → produce ONE event.
-If uncertain → DO NOT split.
+You MUST create ONE minimal abstract context event.
 
-==================================================
-2️⃣ PARENT–CHILD RELATIONSHIP RULES
-==================================================
+This context event:
 
-Main event:
-- is_sub_event = false
-- parent_event_id = null
-- represents the primary fact of the block
+• Represents the shared scenario.
+• Must be neutral and factual.
+• Must NOT summarize the whole block.
+• Must NOT add interpretation.
+• Must NOT include narrative tone.
 
-Sub-event:
-- is_sub_event = true
-- parent_event_id = main event's event_id
-- represents:
-  - a causal action
-  - a decisive moment
-  - a concrete detail that directly explains the main event
+Examples:
 
-If no clear hierarchy exists:
-- create multiple main events
-- all with parent_event_id = null
+Match:
+"Arsenal vs Palace EFL Cup quarter-final"
 
-==================================================
-3️⃣ EVENT_DESCRIPTION RULES (CRITICAL)
-==================================================
+Transfer:
+"De Ligt transfer from Bayern Munich to Manchester United"
 
-event_description MUST:
+Contract:
+"Saka contract extension at Arsenal"
 
-- Be ONE sentence
-- Be concise but information-dense
-- Describe WHAT happened, WHO was involved, and WHAT action occurred
-- Be sufficient for downstream modules to extract:
-  - participants
-  - event type
-  - possible constraints
+General:
+"Manchester City vs Liverpool Premier League match"
 
-event_description MAY include:
-- time expressions (as text)
-- scores or outcomes
-- locations
+Context Event Rules:
+• event_id format: "<block_id>-0"
+• parent_event_id = null
+• is_sub_event = false
+• All other events must attach to this event.
 
-event_description MUST NOT:
-- add interpretation or narrative tone
-- introduce future implications
-- infer unstated facts
-- summarize the entire block
+If there is ONLY ONE event in the block:
+→ DO NOT create context event.
 
-Good examples:
-- "De Ligt agreed to join Manchester United from Bayern Munich"
-- "Arsenal defeated Crystal Palace on penalties"
-- "Marc Guehi scored an equaliser in stoppage time"
-- "Chelsea announced the appointment of a new head coach"
+--------------------------------------------------
+STEP 3 — PARENT STRUCTURE
+--------------------------------------------------
 
-Bad examples:
-- "A dramatic moment followed"
-- "This secured qualification"
-- "The team showed resilience"
+Case A — Only one event:
+    event_id: "<block_id>-1"
+    parent_event_id: null
+    is_sub_event: false
 
-==================================================
-4️⃣ BLOCK_TEXT RULES
-==================================================
+Case B — Multiple related events:
+    Context:
+        event_id: "<block_id>-0"
+        parent_event_id: null
+        is_sub_event: false
 
-- block_text MUST be the FULL original input text
-- DO NOT modify, summarize, or partially copy
-- All events may share the same block_text
+    Child events:
+        event_id: "<block_id>-1", "<block_id>-2", ...
+        parent_event_id: "<block_id>-0"
+        is_sub_event: true
 
-==================================================
-5️⃣ EVENT_ID RULES
-==================================================
+Case C — Multiple unrelated events:
+    All events are main events.
+    No context event.
 
-- Main events: "{block_id}-1", "{block_id}-2", ...
-- Sub-events: "{parent_event_id}-1", "{parent_event_id}-2", ...
+--------------------------------------------------
+EVENT_DESCRIPTION REQUIREMENTS
+--------------------------------------------------
 
-Example:
-block_id = "010"
-- main event: "010-1"
-- sub-event: "010-1-1"
+Must:
+• Be one sentence.
+• Be factual and verifiable.
+• Contain concrete actors where possible.
+• May include score or time if explicitly stated.
+• Be 10–30 words.
+• Be compact but information-complete.
 
-==================================================
-FORBIDDEN ACTIONS
-==================================================
+Must NOT:
+• Add interpretation
+• Add future implications
+• Add narrative tone
+• Infer unstated facts
+• Summarize the entire block
 
-❌ No date normalization
-❌ No state assignment
-❌ No constraint generation
-❌ No entity inference
-❌ No comments or explanations
+Good:
+"Marc Guehi scored an equaliser in stoppage time."
+"Arsenal won the penalty shoot-out 8-7."
+"De Ligt agreed to join Manchester United from Bayern Munich."
 
-==================================================
-OUTPUT HARD CONSTRAINTS (ABSOLUTE)
-==================================================
+Bad:
+"Arsenal secured a dramatic victory."
+"Palace fought bravely."
+"This result keeps them on course for Wembley."
 
-- Output ONLY valid JSON
-- No markdown
-- No natural language prefixes or suffixes
-- No comments
-- No placeholder values ("...", "same as above")
+--------------------------------------------------
+BLOCK_TEXT RULE
+--------------------------------------------------
 
-JSON must be directly parseable by standard JSON parsers.
+• MUST copy the COMPLETE original input text.
+• NEVER modify it.
+• NEVER truncate it.
+• All events share identical block_text.
 
-==================================================
-FINAL INSTRUCTION
-==================================================
+--------------------------------------------------
+CRITICAL JSON RULES
+--------------------------------------------------
+
+• Use double quotes only.
+• true / false must be lowercase.
+• null must be lowercase.
+• No comments.
+• No placeholders like "..."
+• No extra text.
 
 Return ONLY the JSON object.
-Nothing else.
 
+==================================================
+INPUT
+==================================================
+
+Block ID: {block_id}
+Source: {source}
+Publish Date: {publish_date}
+Text: {text}
+
+==================================================
+OUTPUT
+==================================================
 
 """
 
@@ -318,7 +325,7 @@ class OllamaBackend:
     
     def __init__(
         self, 
-        model: str = "llama3:latest",
+        model: str = "gemma3:12b",
         host: str = "http://localhost:11434"
     ):
         """

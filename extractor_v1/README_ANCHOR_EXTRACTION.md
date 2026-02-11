@@ -109,7 +109,7 @@ extractor_v1/
 ```python
 from extractor_v1.event_decomposition import EventDecomposer
 
-decomposer = EventDecomposer(model="llama3:latest")
+decomposer = EventDecomposer(model="gemma3:12b")
 
 block = {
     "block_id": "001",
@@ -423,13 +423,13 @@ block = {
 }
 
 # 第一步：事件分解
-decomposer = EventDecomposer(model="llama3:latest")
+decomposer = EventDecomposer(model="gemma3:12b")
 decomposition_result = decomposer.decompose(block)
 
 print(f"Generated {len(decomposition_result['events'])} events")
 
 # 第二步：对每个事件进行锚点抽取
-extractor = AnchorExtractor(model="llama3:latest")
+extractor = AnchorExtractor(model="gemma3:12b")
 
 for event in decomposition_result['events']:
     # 将事件转换为 block 格式

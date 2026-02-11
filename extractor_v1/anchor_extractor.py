@@ -23,7 +23,7 @@ class AnchorExtractor:
     
     def __init__(
         self,
-        model: str = "llama3:latest",
+        model: str = "gemma3:12b",
         host: str = "http://localhost:11434"
     ):
         """

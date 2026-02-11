@@ -27,7 +27,7 @@ def example_1_basic_usage():
     
     # 初始化抽取器
     # extractor = AnchorExtractor(model="qwen3:8b")
-    extractor = AnchorExtractor(model="llama3:latest")
+    extractor = AnchorExtractor(model="gemma3:12b")
     
     # 准备输入 block
     block = {

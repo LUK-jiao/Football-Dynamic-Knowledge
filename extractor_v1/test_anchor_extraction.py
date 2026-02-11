@@ -294,7 +294,7 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="Test Football Anchor Extraction")
-    parser.add_argument("--model", type=str, default="llama3:latest", help="Ollama 模型名称")
+    parser.add_argument("--model", type=str, default="gemma3:12b", help="Ollama 模型名称")
     parser.add_argument("--skip-llm", action="store_true", help="跳过 LLM 相关测试")
     parser.add_argument("--test", type=str, choices=["connection", "prompt", "backend", "extractor", "batch", "edge", "all"], 
                         default="all", help="运行特定测试")

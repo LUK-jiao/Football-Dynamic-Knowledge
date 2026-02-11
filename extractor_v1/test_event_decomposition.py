@@ -49,7 +49,7 @@ def test_single_event():
         "publish_date": "2025-08-23"
     }
     
-    decomposer = EventDecomposer(model="llama3:latest")
+    decomposer = EventDecomposer(model="gemma3:12b")
     result = decomposer.decompose(block)
     
     print_events(result, "Single Event - Transfer Agreement")
@@ -71,7 +71,7 @@ def test_multiple_events():
         "publish_date": "2025-01-15"
     }
     
-    decomposer = EventDecomposer(model="llama3:latest")
+    decomposer = EventDecomposer(model="gemma3:12b")
     result = decomposer.decompose(block)
     
     print_events(result, "Multiple Events - Match with Decisive Goal")
@@ -106,7 +106,7 @@ def test_complex_block():
         "publish_date": "2025-01-15"
     }
     
-    decomposer = EventDecomposer(model="llama3:latest")
+    decomposer = EventDecomposer(model="gemma3:12b")
     result = decomposer.decompose(block)
     print(f"\nOriginal text: \n {block['text']}")
     print_events(result, "Complex Block - Match Narrative with Multiple Goals")
@@ -123,7 +123,7 @@ def test_independent_events():
         "publish_date": "2025-01-10"
     }
     
-    decomposer = EventDecomposer(model="llama3:latest")
+    decomposer = EventDecomposer(model="gemma3:12b")
     result = decomposer.decompose(block)
     
     print_events(result, "Independent Events - Two Separate Transfers")

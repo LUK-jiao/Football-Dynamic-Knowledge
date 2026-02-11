@@ -170,9 +170,9 @@ def test_full_pipeline_with_extraction():
     print("\n[STEP 2] Semantic Chunking...")
     
     preprocess_backend = PreprocessBackend(
-        model="llama3:latest",
+        model="gemma3:12b",
         timeout=30,
-        temperature=0.2
+        temperature=0.05
     )
     
     config = ChunkerConfig(
@@ -205,7 +205,7 @@ def test_full_pipeline_with_extraction():
     # ========================================================================
     print("\n[STEP 4] Extracting anchors from semantic blocks...")
     
-    extractor = AnchorExtractor(model="llama3:latest")
+    extractor = AnchorExtractor(model="gemma3:12b")
     
     # Extract anchors from all blocks
     results = []
@@ -322,7 +322,7 @@ a further year. An aggressive, deep-lying forward capable of scoring and creatin
     sentences = splitter.split(raw_text)
     print(f"\n[STEP 1] Split into {len(sentences)} sentences")
     
-    preprocess_backend = PreprocessBackend(model="llama3:latest", timeout=30, temperature=0.2)
+    preprocess_backend = PreprocessBackend(model="gemma3:12b", timeout=30, temperature=0.2)
     config = ChunkerConfig(granularity=GranularityMode.MEDIUM, log_scores=False)
     chunker = SemanticChunker(llm=preprocess_backend, config=config)
     
@@ -335,7 +335,7 @@ a further year. An aggressive, deep-lying forward capable of scoring and creatin
     blocks = format_semantic_blocks_for_extractor(chunks, source_name, publish_date)
     print(f"[STEP 3] Formatted {len(blocks)} blocks")
     
-    extractor = AnchorExtractor(model="llama3:latest")
+    extractor = AnchorExtractor(model="gemma3:12b")
     
     results = []
     total_time = 0.0

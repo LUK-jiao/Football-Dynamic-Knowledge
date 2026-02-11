@@ -33,7 +33,7 @@ class EventDecomposer:
     
     def __init__(
         self,
-        model: str = "llama3:latest",
+        model: str = "gemma3:12b",
         host: str = "http://localhost:11434"
     ):
         """
@@ -161,7 +161,7 @@ class EventDecomposer:
 
 def decompose_block(
     block: Dict[str, Any],
-    model: str = "llama3:latest",
+    model: str = "gemma3:12b",
     host: str = "http://localhost:11434"
 ) -> Dict[str, Any]:
     """

@@ -70,7 +70,7 @@ from semantic_blocker import (
 
 splitter = SentenceSplitter()
 
-backend = OllamaBackend(model="llama3:latest", temperature=0.2)- ❌ v1: LLM outputs binary `SAME_UNIT` / `NEW_UNIT` (unstable)- `NEW_UNIT` - Current sentence starts a new semantic unit
+backend = OllamaBackend(model="gemma3:12b", temperature=0.2)- ❌ v1: LLM outputs binary `SAME_UNIT` / `NEW_UNIT` (unstable)- `NEW_UNIT` - Current sentence starts a new semantic unit
 
 config = ChunkerConfig(granularity=GranularityMode.MEDIUM)
 
@@ -142,7 +142,7 @@ for chunk in chunks:### 🪟 Sliding Window Architecture
 
 
 
-| 分数 | 含义 | 示例 |backend = OllamaBackend(model="llama3:latest", temperature=0.2)
+| 分数 | 含义 | 示例 |backend = OllamaBackend(model="gemma3:12b", temperature=0.2)
 
 |------|------|------|
 
@@ -238,7 +238,7 @@ if len(chunk) >= 5:    ↓# Ensure Ollama is running
 
 **统计**: `"总体而言,"`, `"这是"`, `"历史上"`  
 
-**未来赛程**: `"将面对"`, `"半决赛"`, `"下一轮"`      ↓ollama pull llama3:latest
+**未来赛程**: `"将面对"`, `"半决赛"`, `"下一轮"`      ↓ollama pull gemma3:12b
 
 **时间转换**: `"与此同时,"`, `"之后,"`, `"比赛结束后"`
 
@@ -274,7 +274,7 @@ Final Chunks (with types)
 
 class Chunk:
 
-    sentences: List[str]  # 句子列表backend = OllamaBackend(model="llama3:latest")
+    sentences: List[str]  # 句子列表backend = OllamaBackend(model="gemma3:12b")
 
     chunk_id: int         # 块编号
 
@@ -394,9 +394,9 @@ class LLMBackend:    window_size=1,              # Context window size
 
 ```python
 
-OllamaBackend(    context_window=2,                    # Previous N sentencesbackend = OllamaBackend(model="llama3:latest", timeout=30)
+OllamaBackend(    context_window=2,                    # Previous N sentencesbackend = OllamaBackend(model="gemma3:12b", timeout=30)
 
-    model="llama3:latest",
+    model="gemma3:12b",
 
     temperature=0.2,    enable_structural_rules=True,        # Auto-detect quotes/statschunker = SemanticChunker(backend, config)
 
@@ -466,7 +466,7 @@ python preprocess/integration_test.py
 
 ollama serve
 
-ollama pull llama3:latest- `sentences` (List[str]): Pre-split sentences
+ollama pull gemma3:12b- `sentences` (List[str]): Pre-split sentences
 
 ```
 
@@ -566,7 +566,7 @@ config = ChunkerConfig(log_scores=True)
 
 ```
 
-semantic_blocker/```    model="llama3:latest",
+semantic_blocker/```    model="gemma3:12b",
 
 ├── semantic_chunker.py      # 核心逻辑 (450行)
 
@@ -708,7 +708,7 @@ class LLMBackend:The LLM follows these canonical rules:
 
 OllamaBackend(## Architecture
 
-    model="llama3:latest",
+    model="gemma3:12b",
 
     temperature=0.2,```
 
@@ -778,7 +778,7 @@ python preprocess/integration_test.py│               ▼                      
 
 ollama serve```
 
-ollama pull llama3:latest
+ollama pull gemma3:12b
 
 ```## Testing
 
@@ -900,7 +900,7 @@ semantic_blocker/    sentences,
 
 
 
-**v2.0.0** (2026-01-06)backend = OllamaBackend(model="llama3:latest")
+**v2.0.0** (2026-01-06)backend = OllamaBackend(model="gemma3:12b")
 
 - Complete rewrite: binary → continuous scoringchunks = semantic_chunk(sentences, backend, window_size=1)
 
@@ -982,7 +982,7 @@ curl http://localhost:11434/api/tags
 ollama list
 
 # Pull the model
-ollama pull llama3:latest
+ollama pull gemma3:12b
 ```
 
 ### High fallback rate

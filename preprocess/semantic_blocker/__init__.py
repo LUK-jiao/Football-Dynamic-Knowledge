@@ -22,7 +22,7 @@ Usage:
     >>> sentences = splitter.split(text)
     >>> 
     >>> # Configure chunker
-    >>> backend = OllamaBackend(model="llama3:latest", temperature=0.2)
+    >>> backend = OllamaBackend(model="gemma3:12b", temperature=0.2)
     >>> config = ChunkerConfig(
     ...     granularity=GranularityMode.MEDIUM,
     ...     enable_structural_rules=True

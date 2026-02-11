@@ -36,6 +36,7 @@ def test_full_pipeline():
     print("\n[TEST 1] Football Match Report")
     print("-"*80)
     
+    title_1 = "Arsenal Wins EFL Cup Quarter-Final Against Crystal Palace on Penalties"
     text_1 = """
     Mikel Arteta's Arsenal side marched on to the EFL Cup semi-finals but did it the hard way by winning 8-7 on penalties against Crystal Palace, 
     with Kepa Arrizabalaga saving the 16th spot-kick taken by Maxence Lacroix after 15 successful conversions.
@@ -50,6 +51,7 @@ def test_full_pipeline():
     "I think we had some big individual performances tonight. It's great for Gabriel Jesus tonight, after almost a year out, to start a game and make his 100th [Arsenal] appearance. The commitment within the group is incredible and I'm very happy for the boys."
     """
     
+    print(f"\nTitle: {title_1}")
     print("\nOriginal text:")
     print(text_1[:200] + "...")
     
@@ -58,21 +60,17 @@ def test_full_pipeline():
     splitter = SentenceSplitter(min_length=10)
     sentences = splitter.split(text_1)
     
-    # print(f"  ✓ Split into {len(sentences)} sentences:")
-    # for i, sent in enumerate(sentences, 1):
-    #     print(f"    {i}. {sent}")
-    
     # Step 2: Semantic chunking with v2 system
     print("\n[Step 2] Semantic Chunking with Ollama v2 (Continuous Scoring)...")
     
-    backend = OllamaBackend(model="llama3:latest", timeout=30, temperature=0.2)
+    backend = OllamaBackend(model="gemma3:12b", timeout=30, temperature=0.05)
     
     config = ChunkerConfig(
-        granularity=GranularityMode.FINE,
+        granularity=GranularityMode.MEDIUM,
         context_window=2,
         max_sentences_per_chunk=10,
-        enable_structural_rules=True,
-        enable_orphan_merge=True,
+        enable_structural_rules=False,
+        enable_orphan_merge=False,
         log_scores=True
     )
     
@@ -91,6 +89,7 @@ def test_full_pipeline():
     print("[TEST 2] Mixed Topics (Transfer + Injury)")
     print("-"*80)
     
+    title_2 = "West Ham United Signs Taty Castellanos from Lazio"
     text_2 = """
 West Ham United is delighted to announce the signing of Argentina international forward Taty Castellanos. 
 The 27-year-old joins the Hammers from Italian club Lazio on a four-and-a-half year contract with the option for 
@@ -106,16 +105,20 @@ a further year. An aggressive, deep-lying forward capable of scoring and creatin
  to try to bring that energy, that fighting spirit I have inside, so that every match is as important and as tough as possible. I hope to 
  give my all to the fans. I've always defended the jersey of every team with the utmost responsibility, and 
  I want to tell them that I'm going to give everything, to defend this jersey, and obviously, to achieve our goals day after day. That's 
- the most important thing.” Everyone at West Ham United would like to welcome Taty and his family to East London, and wishes him every success for his career in Claret and Blue.
+ the most important thing." Everyone at West Ham United would like to welcome Taty and his family to East London, and wishes him every success for his career in Claret and Blue.
  """
+    print(f"\nTitle: {title_2}")
     print("\nOriginal text:")
     print(text_2[:150] + "...")
     
     # Pipeline execution
     print("\n[Step 1] Sentence Splitting...")
     sentences_2 = splitter.split(text_2)
-    print(f"  ✓ Split into {len(sentences_2)} sentences")
     
+    print(f"  ✓ Split into {len(sentences_2)} sentences:")
+    for i, sent in enumerate(sentences_2, 1):
+        print(f"    {i}. {sent}")
+        
     print("\n[Step 2] Semantic Chunking...")
     chunks_2 = chunker.chunk(sentences_2)
     print(f"  ✓ Created {len(chunks_2)} semantic chunks:")
@@ -131,6 +134,7 @@ a further year. An aggressive, deep-lying forward capable of scoring and creatin
     print("[TEST 3] Quote Aggregation")
     print("-"*80)
     
+    title_3 = "Guardiola Discusses Form and De Bruyne Contract Extension"
     text_3 = """
     Pep Guardiola spoke about Manchester City's recent form in his press conference.
     He said: "We need to improve our finishing. We created many chances but didn't 
@@ -140,6 +144,7 @@ a further year. An aggressive, deep-lying forward capable of scoring and creatin
     Kevin De Bruyne has signed a new three-year contract extension with the club.
     """
     
+    print(f"\nTitle: {title_3}")
     print("\nOriginal text:")
     print(text_3.strip())
     
@@ -200,7 +205,7 @@ def test_edge_cases():
     print("="*80)
     
     splitter = SentenceSplitter()
-    backend = OllamaBackend(model="llama3:latest", temperature=0.2)
+    backend = OllamaBackend(model="gemma3:12b", temperature=0.2)
     config = ChunkerConfig(granularity=GranularityMode.MEDIUM)
     chunker = SemanticChunker(llm=backend, config=config)
     
