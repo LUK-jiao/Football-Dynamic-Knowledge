@@ -120,14 +120,19 @@ class SentenceSplitter:
             sent = sentences[i]
             
             # Check if this sentence introduces a quote
+            # MUST have BOTH reporting verb AND quotes to start aggregation
             has_reporting_verb = any(
                 f' {verb} ' in f' {sent.lower()} '
                 for verb in REPORTING_VERBS
             )
-            has_colon_quote = ':' in sent and ('"' in sent or "'" in sent)
+            has_quotes = '"' in sent or "'" in sent
+            has_colon_quote = ':' in sent and has_quotes
+            
+            # Only aggregate if sentence has reporting verb AND quotes, or colon+quote
+            should_aggregate = (has_reporting_verb and has_quotes) or has_colon_quote
             
             # If has reporting verb/colon+quote, start aggregating
-            if has_reporting_verb or has_colon_quote:
+            if should_aggregate:
                 merged = [sent]
                 i += 1
                 

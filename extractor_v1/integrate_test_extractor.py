@@ -75,7 +75,7 @@ def format_semantic_blocks_for_decomposition(chunks: List[Any], source_name: str
 
 
 def print_extraction_results(results: List[Dict[str, Any]]):
-    """Pretty print extraction results."""
+    """Pretty print extraction results (adapted for flattened schema)."""
     
     print("\n" + "="*80)
     print("EXTRACTION RESULTS")
@@ -87,38 +87,38 @@ def print_extraction_results(results: List[Dict[str, Any]]):
         print(f"Description: {result.get('event_description', 'N/A')[:100]}...")
         print(f"Fact Type: {result['fact_type']}")
         
-        anchors = result.get('anchors', {})
-        
-        # Participants
-        participants = anchors.get('participants', [])
+        # Participants (now at top level)
+        participants = result.get('participants', [])
         if participants:
             print(f"\nParticipants ({len(participants)}):")
             for p in participants:
                 print(f"  • {p['name']} ({p['type']})")
         
-        # Temporal Anchors
-        temporal = anchors.get('temporal_anchors', [])
+        # Temporal Anchors (now at top level)
+        temporal = result.get('temporal_anchors', [])
         if temporal:
             print(f"\nTemporal Anchors ({len(temporal)}):")
             for t in temporal:
-                if 'event_date' in t:
+                if t.get('event_date'):
                     print(f"  • Event Date: {t['event_date']}")
-                if 'valid_from' in t or 'valid_to' in t:
+                if t.get('valid_from') or t.get('valid_to'):
                     print(f"  • Valid Period: {t.get('valid_from', '?')} → {t.get('valid_to', '?')}")
         
-        # Sources
-        sources = anchors.get('sources', [])
+        # Sources (now at top level)
+        sources = result.get('sources', [])
         if sources:
             print(f"\nSources ({len(sources)}):")
             for s in sources:
-                print(f"  • {s['name']} ({s['type']})")
+                source_type = s.get('type', 'UNKNOWN')
+                source_name = s.get('source', 'N/A')
+                print(f"  • {source_name} ({source_type})")
         
-        # Constraints
-        constraints = anchors.get('constraints', [])
+        # Constraints (now at top level, simplified structure)
+        constraints = result.get('constraints', [])
         if constraints:
             print(f"\nConstraints ({len(constraints)}):")
             for c in constraints:
-                print(f"  • {c['type']}: {c['subject']} → {c['expected_state']}")
+                print(f"  • {c['type']}")
         
         print("-"*80)
 
@@ -131,28 +131,17 @@ def test_full_pipeline_with_extraction():
     print("="*80)
     
     # ========================================================================
-    # Test Case 1: Arsenal vs Crystal Palace Match Report
+    # Test Case 1: Frank leaves Tottenham Hotspur - Coach Departure Announcement
     # ========================================================================
-    print("\n[TEST 1] Arsenal vs Crystal Palace - Match Report")
+    print("\n[TEST 1] Frank leaves Tottenham Hotspur - Coach Departure Announcement")
     print("-"*80)
     
     raw_text = """
-    Mikel Arteta's Arsenal side marched on to the EFL Cup semi-finals but did it the hard way by winning 8-7 on penalties against Crystal Palace, 
-    with Kepa Arrizabalaga saving the 16th spot-kick taken by Maxence Lacroix after 15 successful conversions.
-    Two late goals had resulted in a 1-1 draw after 90 minutes and a lengthy period of stoppage time.
-    The Gunners will now face rivals Chelsea to fight for a place in the final at Wembley, with the first leg of their semi-final set for Stamford Bridge on 14 January.
-    After bossing much of the quarter-final against Palace and creating the majority of big chances, Arteta's men finally found their breakthrough, which came from a corner in the 80th minute. A well-placed delivery into the box from Bukayo Saka found the head of Riccardo Calafiori and eventually went into the net off Palace centre-back Lacroix.
-    The unfortunate own goal did not dampen Palace's spirits as they went in search of an equaliser. When it finally did arrive, they had club captain Marc Guehi to thank. The England international was the first to react to a knock-on from Jefferson Lerma in the fifth minute of stoppage time.
-    A fascinating penalty shoot-out then ensued, with both sides delivering spectacular finishes to take the score to 8-7. When the own-goal scorer Lacroix stepped up to take his kick, Arsenal keeper Kepa read its direction and made the save to ensure the Gunners remain on course for their first Wembley appearance in five years.
-    This was Arsenal's second-highest scoring penalty shootout, after their 9-8 victory against Rotherham in 2003/04. Overall, the Gunners have converted 47 of their last 51 spot-kicks in shoot-outs, giving them a supreme 92 per cent conversion rate.
-    Arteta told Sky Sports after the game: "I'm very happy to be in the semi-finals. We played against a team who are hard to generate chances against. We generated a lot and we should have scored many more goals."
-    The Arsenal boss had made eight changes to his starting line-up and admitted: "It's always tough because they don't have the right chemistry when they haven't played together. But their attitude is excellent.
-    "I think we had some big individual performances tonight. It's great for Gabriel Jesus tonight, after almost a year out, to start a game and make his 100th [Arsenal] appearance. The commitment within the group is incredible and I'm very happy for the boys."
-    """
-    title = "Arsenal vs Crystal Palace - Match Report"
+    Tottenham Hotspur have confirmed the departure of head coach Thomas Frank with immediate effect. The 52-year-old Dane joined Spurs last summer after a successful seven-year spell with Brentford. His appointment on 12 June 2025 followed the departure of Ange Postecoglou. Frank made an encouraging start, winning three of his first four Premier League matches and overseeing a narrow defeat to UEFA Champions League winners Paris Saint-Germain in the UEFA Super Cup. However, Spurs' form has dipped since, with Tuesday's 2-1 home defeat by Newcastle United proving to be the Dane's last match in charge. That result leaves Spurs 16th in the table, five points clear of the relegation zone. Frank leaves having overseen 13 wins, 11 draws and 14 losses in his 38 games in charge. There has already been much speculation over who could succeed Frank. Former Spurs manager Mauricio Pochettino, who took the club to a second-placed Premier League finish in 2016/17 and a Champions League final in 2018/19, is one possible candidate, although he will lead the United States Men's National Team in the upcoming FIFA World Cup this summer. Former Brighton & Hove Albion head coach Roberto De Zerbi has been mooted after leaving Marseille, as has ex-Spurs forward Robbie Keane, now coaching at Ferencvaros in Hungary, and former Barcelona head coach Xavi."""
+    title = "Head coach leaves north London club after eight months in charge following 2-1 defeat to Newcastle"
     
     source_name = "BBC Sport"
-    publish_date = "2025-01-15"
+    publish_date = "2025-02-12"
     
     print(f"\nSource: {source_name}")
     print(f"Date: {publish_date}")
@@ -183,12 +172,12 @@ def test_full_pipeline_with_extraction():
     )
     
     config = ChunkerConfig(
-        granularity=GranularityMode.FINE,
+        granularity=GranularityMode.MEDIUM,
         context_window=2,
         max_sentences_per_chunk=10,
-        enable_structural_rules=True,
-        enable_orphan_merge=True,
-        log_scores=False
+        enable_structural_rules=False,
+        enable_orphan_merge=False,
+        log_scores=True
     )
     
     chunker = SemanticChunker(llm=preprocess_backend, config=config)
@@ -196,8 +185,8 @@ def test_full_pipeline_with_extraction():
     
     print(f"  ✓ Created {len(chunks)} semantic chunks:")
     for chunk in chunks:
-        preview = ' '.join(chunk.sentences)[:100]
-        print(f"    • Chunk {chunk.chunk_id} ({chunk.chunk_type}): {preview}...")
+        preview = ' '.join(chunk.sentences)
+        print(f"    • Chunk {chunk.chunk_id} ({chunk.chunk_type}): {preview}")
     
     # ========================================================================
     # STEP 3: Format blocks for decomposition (filter quote_attribution)
@@ -212,7 +201,7 @@ def test_full_pipeline_with_extraction():
     # ========================================================================
     print("\n[STEP 4] Decomposing blocks into events...")
     
-    extractor_backend = ExtractorBackend(model="llama3:latest")
+    extractor_backend = ExtractorBackend(model="gemma3:12b")
     
     # Decompose each block into events
     all_events = []
@@ -281,7 +270,7 @@ def test_full_pipeline_with_extraction():
         (len(all_events) > 0, "Should produce events from decomposition"),
         (len(results) > 0, "Should produce extraction results"),
         (len(results) == len(all_events), "All events should be processed"),
-        (all('anchors' in r for r in results), "All results should have anchors"),
+        (all('participants' in r for r in results), "All results should have participants"),
         (all('fact_type' in r for r in results), "All results should have fact_type"),
     ]
     
@@ -295,16 +284,16 @@ def test_full_pipeline_with_extraction():
     # Check for common issues
     print("\n[Quality Checks]")
     
-    # Check participants
-    total_participants = sum(len(r['anchors'].get('participants', [])) for r in results)
+    # Check participants (now at top level)
+    total_participants = sum(len(r.get('participants', [])) for r in results)
     print(f"  • Total participants extracted: {total_participants}")
     
-    # Check constraints
-    total_constraints = sum(len(r['anchors'].get('constraints', [])) for r in results)
+    # Check constraints (now at top level)
+    total_constraints = sum(len(r.get('constraints', [])) for r in results)
     print(f"  • Total constraints extracted: {total_constraints}")
     
     # Check for nickname conversion
-    all_participant_names = [p['name'] for r in results for p in r['anchors'].get('participants', [])]
+    all_participant_names = [p['name'] for r in results for p in r.get('participants', [])]
     has_arsenal = 'Arsenal' in all_participant_names
     has_gunners = 'The Gunners' in all_participant_names or 'the Gunners' in all_participant_names
     
@@ -368,8 +357,8 @@ a further year. An aggressive, deep-lying forward capable of scoring and creatin
     chunks = chunker.chunk(sentences)
     print(f"[STEP 2] Created {len(chunks)} semantic chunks")
     for chunk in chunks:
-        preview = ' '.join(chunk.sentences)[:80]
-        print(f"  • Chunk {chunk.chunk_id} ({chunk.chunk_type}): {preview}...")
+        preview = ' '.join(chunk.sentences)
+        print(f"  • Chunk {chunk.chunk_id} ({chunk.chunk_type}): {preview}")
     
     blocks = format_semantic_blocks_for_decomposition(chunks, source_name, title, publish_date)
     print(f"[STEP 3] Formatted {len(blocks)} blocks for decomposition")

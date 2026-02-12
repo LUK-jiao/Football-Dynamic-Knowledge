@@ -49,17 +49,16 @@ class AnchorExtractor:
                 - publish_date: 发布日期
         
         Returns:
-            包含锚点的结果 dict，结构：
+            包含锚点的结果 dict（扁平化结构 v2.0）：
             {
                 "event_id": "...",
                 "title_anchors": "...",
-                "anchors": {
-                    "participants": [...],
-                    "temporal_anchors": [...],
-                    "sources": [...],
-                    "constraints": [...]
-                },
+                "event_description": "...",
+                "participants": [...],
                 "fact_type": "EVENT|STATE",
+                "constraints": [...],
+                "temporal_anchors": [...],
+                "sources": [...],
                 "inference_time": 1.234  # LLM 推理时间（秒）
             }
         

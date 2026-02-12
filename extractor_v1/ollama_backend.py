@@ -9,111 +9,237 @@ import json
 from typing import Dict, Any, Optional
 import ollama
 
-SYSTEM_PROMPT = """You are a football-domain information extraction agent.
-Extract structured anchors from ONE football event and output a COMPLETE JSON.
+SYSTEM_PROMPT = """You are a FOOTBALL EVENT EXTRACTION AGENT.
 
-=====================
-INPUT STRUCTURE
-=====================
+Your task is to extract structured data for ONE football event.
 
-You will receive a single EVENT with:
-- event_id: unique identifier
-- title_anchors: contextual scope (e.g., "Arsenal vs Palace EFL Cup")
-- event_description: THE PRIMARY TEXT FOR NER (one sentence describing the event)
-- block_text: full original text (for reference only)
-- source: information source
-- publish_date: publication date
+You are performing STRICT INFORMATION EXTRACTION.
 
-=====================
-OUTPUT JSON SCHEMA
-=====================
+You must:
+- Use ONLY the provided input fields.
+- Use ONLY event_description as the primary source.
+- NOT use external knowledge.
+- NOT infer missing facts.
+- NOT create new categories.
+- NOT enrich beyond the text.
+
+If information is not explicitly supported,
+leave the field empty or null.
+
+==================================================
+PRIMARY SOURCE PRIORITY
+==================================================
+
+1) event_description (authoritative)
+2) block_text (only to clarify incomplete names already mentioned)
+
+You MUST NOT:
+- Extract entities only from title_anchors
+- Infer teams, competitions, or dates
+- Assume contextual football knowledge
+
+==================================================
+OUTPUT STRUCTURE
+==================================================
+
+Return VALID JSON only.
+No explanations.
+No markdown.
+No comments.
+
+All top-level fields MUST exist.
+Arrays MAY be empty.
+
 {
-  "event_id": "...",
-  "title_anchors": "...",
-  "event_description": "...",
-  "source": "...",
-  "publish_date": "...",
-  "anchors": {
-    "participants": [
-      {"type": "Player|Club|Coach|Stadium|Tournament|Referee|Other", "name": "..."}
-    ],
-    "temporal_anchors": [
-      {"event_date": "YYYY-MM-DD", "valid_from": "YYYY-MM-DD", "valid_to": "YYYY-MM-DD"}
-    ],
-    "sources": [
-      {"name": "...", "type": "Media|Official|Social|Other"}
-    ],
-    "constraints": [
-      {
-        "type": "TRANSFER_STATUS|CONTRACT_STATUS|INJURY_STATUS|MATCH_STATUS|SUSPENSION_STATUS",
-        "subject": "...",
-        "expected_state": "..."
-      }
-    ]
-  },
-  "fact_type": "EVENT|STATE"
+  "event_id": string,
+  "title_anchors": [...],
+  "event_description": string,
+  "participants": [
+    {
+      "type": "Person" | "Club" | "NationalTeam" | "Competition" | "Stadium",
+      "name": string
+    }
+  ],
+  "fact_type": "EVENT" | "STATE",
+  "constraints": [
+    { "type": string }
+  ],
+  "temporal_anchors": [
+    {
+      "event_date": string | null,
+      "valid_from": string | null,
+      "valid_to": string | null
+    }
+  ],
+  "sources": [
+    {
+      "type": string,
+      "source": string,
+      "publish_date": string
+    }
+  ]
 }
 
-=====================
-CRITICAL RULES
-=====================
+==================================================
+PARTICIPANTS
+==================================================
 
-1️⃣ PRIMARY NER SOURCE: event_description
-- Perform Named Entity Recognition PRIMARILY on event_description
-- This is the cleanest, most focused text for extraction
-- Use block_text ONLY as supplementary context if needed
+Extract ONLY named entities that appear explicitly
+in event_description.
 
-2️⃣ PARTICIPANTS
-- Extract ALL explicitly mentioned entities from event_description
-- Convert nicknames to official names (e.g. "the Gunners" → "Arsenal")
-- Team / club nicknames MUST be type "Club", NEVER "Player"
-- Include entities from title_anchors if they provide context
-- Do NOT invent entities or use external knowledge
+Do NOT:
+- Add entities from title_anchors
+- Add implied clubs
+- Guess missing names
+- Expand abbreviations unless explicitly written
 
-3️⃣ CONSTRAINTS (STRICT)
-- Extract ONLY facts EXPLICITLY stated in event_description
-- NO inference beyond the text
-- Each constraint MUST satisfy ALL of the following:
-  - subject is NOT empty
-  - subject EXACTLY matches a name in participants
-  - subject is NOT a generic word (❌ "match", "transfer", "semi-final")
-- If event_description states a role (e.g. "is manager/coach"):
-  → use CONTRACT_STATUS or ROLE-equivalent constraint with explicit wording only
+If no named entities appear → return [].
 
-4️⃣ TEMPORAL ANCHORS
-- Extract ONLY explicit dates/times from event_description
-- Format strictly as YYYY-MM-DD
-- Do NOT use publish_date as event time
-- Use block_text for additional temporal context if needed
+==================================================
+FACT_TYPE
+==================================================
 
-5️⃣ SOURCES
-- Always generate from input `source` field
+EVENT:
+- Instantaneous actions
+  (goal, save, transfer, appointment, win, signing)
 
-6️⃣ FACT TYPE
-- EVENT: completed or scheduled factual events (signed, agreed, won, scored, played)
-- STATE: time-dependent conditions (contract, injury, role, suspension)
+STATE:
+- Explicit ongoing condition
+  (injured, suspended, under contract, banned)
 
-=====================
-HARD REQUIREMENTS
-=====================
-- Copy event_id, title_anchors, event_description, source, publish_date EXACTLY as input
-- ALL top-level fields MUST exist
-- Use [] for empty arrays
-- constraints array MUST contain ≥1 item
-- NEVER hallucinate facts, entities, dates, or states
-- Output JSON ONLY. No explanations.
+If unclear → default to EVENT.
 
-=====================
-EXTRACTION WORKFLOW
-=====================
+==================================================
+CONSTRAINTS (MANDATORY MACRO CATEGORY)
+==================================================
 
-Step 1: Read event_description carefully - this is your PRIMARY input
-Step 2: Extract all named entities (people, clubs, competitions, locations)
-Step 3: Identify temporal expressions
-Step 4: Determine fact_type (EVENT or STATE)
-Step 5: Generate constraints based on the facts stated
-Step 6: Cross-check with title_anchors for context
-Step 7: Use block_text ONLY if additional context is needed
+Each event MUST include at least ONE constraint type.
+
+constraints array MUST NOT be empty.
+
+You may ONLY use one or more of the following 9 types.
+Spelling must match EXACTLY.
+No variations allowed.
+No new categories allowed.
+
+Allowed constraint types:
+
+1. MATCH_ACTION
+2. MATCH_OUTCOME
+3. MATCH_CONTEXT
+4. PLAYER_MOVEMENT
+5. CONTRACT_EVENT
+6. AVAILABILITY_EVENT
+7. APPOINTMENT_EVENT
+8. PERFORMANCE_EVENT
+9. ADMINISTRATIVE_EVENT
+
+Rules:
+- constraints MUST contain at least one type.
+- If uncertain, choose the closest macro category.
+- Multiple types allowed when logically justified.
+- Do NOT duplicate identical types.
+- Do NOT invent subtypes.
+
+Every football-related event must logically belong to at least one macro category.
+
+==================================================
+TEMPORAL_ANCHORS
+==================================================
+
+Temporal information must be extracted ONLY
+from event_description.
+
+All dates MUST be normalized to ISO 8601 format.
+
+Allowed formats:
+- YYYY
+- YYYY-MM
+- YYYY-MM-DD
+
+STRICT RULES:
+
+- No natural language dates.
+- No relative expressions (yesterday, last week).
+- No time-of-day.
+- No timezones.
+- No duration calculations.
+- Do NOT use publish_date as fallback.
+- Do NOT infer contract end dates.
+
+If a date cannot be safely normalized → null.
+
+For EVENT:
+- event_date = explicit normalized date if present
+- valid_from = null
+- valid_to = null
+
+For STATE:
+- event_date = null
+- valid_from = explicit normalized start date if present
+- valid_to = explicit normalized end date if present
+
+If no explicit time information appears:
+Return exactly one temporal_anchors object
+with all fields set to null.
+
+==================================================
+SOURCES
+==================================================
+
+You MUST include exactly one source object.
+
+The "type" field MUST be one of:
+
+1. OFFICIAL
+2. MEDIA
+3. USER_GENERATED
+4. UNKNOWN
+
+Definitions:
+
+OFFICIAL:
+- Official club website
+- Official league website
+- Official federation/association
+- Official announcement
+
+MEDIA:
+- Professional news outlet
+- Sports media
+- News agency
+- Professional journalist reporting
+
+USER_GENERATED:
+- Blog
+- Forum
+- Social media post
+- Unverified account
+- Independent creator
+
+UNKNOWN:
+- Source type cannot be determined
+
+Rules:
+
+- Use ONLY one of the four values.
+- Do NOT invent new categories.
+- Copy the input source name exactly into "source".
+- Copy publish_date exactly as given.
+- Do NOT modify publish_date format.
+
+==================================================
+STRICT OUTPUT RULES
+==================================================
+
+- Copy event_id exactly.
+- Copy title_anchors exactly.
+- Copy event_description exactly.
+- Do NOT summarize.
+- Do NOT rephrase.
+- Do NOT add extra fields.
+- JSON only.
+
 """
 
 # ============================================================================
@@ -581,17 +707,16 @@ class OllamaBackend:
                 - publish_date: 发布日期
             
         Returns:
-            包含锚点的结果 dict：
+            包含锚点的结果 dict（扁平化结构）：
             {
                 "event_id": "...",
                 "title_anchors": "...",
-                "anchors": {
-                    "participants": [...],
-                    "temporal_anchors": [...],
-                    "sources": [...],
-                    "constraints": [...]
-                },
-                "fact_type": "EVENT|STATE"
+                "event_description": "...",
+                "participants": [...],
+                "fact_type": "EVENT|STATE",
+                "constraints": [...],
+                "temporal_anchors": [...],
+                "sources": [...]
             }
         """
         # 验证输入
@@ -724,7 +849,7 @@ def run_event_anchor_extraction(
 
 def validate_schema(result: Dict[str, Any]) -> bool:
     """
-    验证输出是否符合 Schema（Event-based）
+    验证输出是否符合新的扁平化 Schema
     
     Args:
         result: 抽取结果
@@ -732,7 +857,16 @@ def validate_schema(result: Dict[str, Any]) -> bool:
     Returns:
         True if valid, False otherwise
     """
-    required_fields = ["event_id", "title_anchors", "anchors", "fact_type"]
+    required_fields = [
+        "event_id", 
+        "title_anchors", 
+        "event_description",
+        "participants", 
+        "fact_type", 
+        "constraints", 
+        "temporal_anchors", 
+        "sources"
+    ]
     
     # 检查顶层字段
     for field in required_fields:
@@ -740,29 +874,48 @@ def validate_schema(result: Dict[str, Any]) -> bool:
             print(f"❌ 缺少字段: {field}")
             return False
     
-    # 检查 anchors 子字段
-    anchors = result.get("anchors", {})
-    required_anchor_fields = ["participants", "temporal_anchors", "sources", "constraints"]
-    
-    for field in required_anchor_fields:
-        if field not in anchors:
-            print(f"❌ anchors 缺少字段: {field}")
+    # 检查数组类型字段
+    array_fields = ["participants", "constraints", "temporal_anchors", "sources"]
+    for field in array_fields:
+        if not isinstance(result[field], list):
+            print(f"❌ {field} 必须是数组类型")
             return False
-    
-    # 检查 constraints 必须存在且不能为空
-    constraints = anchors.get("constraints")
-    if not isinstance(constraints, list):
-        print(f"❌ constraints 必须是数组类型")
-        return False
-    
-    if len(constraints) == 0:
-        print(f"❌ constraints 不能为空，必须至少包含一个约束")
-        return False
     
     # 检查 fact_type
     if result["fact_type"] not in ["EVENT", "STATE"]:
         print(f"❌ fact_type 无效: {result['fact_type']}")
         return False
+    
+    # 检查 constraints 类型（如果非空）
+    allowed_constraint_types = [
+        "MATCH_ACTION",
+        "MATCH_OUTCOME", 
+        "MATCH_CONTEXT",
+        "PLAYER_MOVEMENT",
+        "CONTRACT_EVENT",
+        "AVAILABILITY_EVENT",
+        "APPOINTMENT_EVENT",
+        "PERFORMANCE_EVENT",
+        "ADMINISTRATIVE_EVENT"
+    ]
+    
+    for constraint in result["constraints"]:
+        if "type" not in constraint:
+            print(f"❌ constraint 缺少 type 字段")
+            return False
+        if constraint["type"] not in allowed_constraint_types:
+            print(f"⚠️  警告: constraint type 不在允许列表中: {constraint['type']}")
+    
+    # 检查 sources 格式
+    for source in result["sources"]:
+        if "type" not in source or "source" not in source or "publish_date" not in source:
+            print(f"❌ source 缺少必需字段 (type, source, publish_date)")
+            return False
+        
+        allowed_source_types = ["OFFICIAL", "MEDIA", "USER_GENERATED", "UNKNOWN"]
+        if source["type"] not in allowed_source_types:
+            print(f"❌ source type 无效: {source['type']}")
+            return False
     
     print("✅ Schema 验证通过")
     return True
