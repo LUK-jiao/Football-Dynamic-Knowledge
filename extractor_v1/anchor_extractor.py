@@ -35,24 +35,24 @@ class AnchorExtractor:
         """
         self.backend = OllamaBackend(model=model, host=host)
     
-    def extract_anchors(self, block: Dict[str, Any]) -> Dict[str, Any]:
+    def extract_anchors(self, event: Dict[str, Any]) -> Dict[str, Any]:
         """
-        从单个语义块中抽取锚点
+        从单个事件中抽取锚点（Anchor Extraction Layer）
         
         Args:
-            block: 输入的语义块，必须包含：
-                - block_id: 唯一标识
-                - text: 原始文本
+            event: 输入的事件，必须包含：
+                - event_id: 事件唯一标识
+                - title_anchors: 标题提炼
+                - event_description: 事件描述（PRIMARY NER SOURCE）
+                - block_text: 原始文本块（参考用）
                 - source: 信息来源
                 - publish_date: 发布日期
         
         Returns:
             包含锚点的结果 dict，结构：
             {
-                "block_id": "...",
-                "text": "...",
-                "source": "...",
-                "publish_date": "...",
+                "event_id": "...",
+                "title_anchors": "...",
                 "anchors": {
                     "participants": [...],
                     "temporal_anchors": [...],
@@ -60,7 +60,6 @@ class AnchorExtractor:
                     "constraints": [...]
                 },
                 "fact_type": "EVENT|STATE",
-                "need_resolver": true|false,
                 "inference_time": 1.234  # LLM 推理时间（秒）
             }
         
@@ -68,13 +67,13 @@ class AnchorExtractor:
             ValueError: 输入格式不正确
         """
         # 验证输入
-        self._validate_input(block)
+        self._validate_input(event)
         
         # 记录开始时间
         start_time = time.time()
         
         # 调用 backend（直接透传，不做任何修改）
-        result = self.backend.extract_anchors(block)
+        result = self.backend.extract_anchors(event)
         
         # 记录结束时间并计算推理时间
         end_time = time.time()
@@ -87,7 +86,7 @@ class AnchorExtractor:
     
     def extract_anchors_batch(
         self, 
-        blocks: List[Dict[str, Any]], 
+        events: List[Dict[str, Any]], 
         max_workers: int = 4,
         show_progress: bool = True
     ) -> List[Dict[str, Any]]:
@@ -95,7 +94,7 @@ class AnchorExtractor:
         批量抽取（并发处理）
         
         Args:
-            blocks: 语义块列表
+            events: 事件列表
             max_workers: 最大并发线程数（默认4，可根据CPU核心数调整）
             show_progress: 是否显示进度
         
@@ -107,25 +106,25 @@ class AnchorExtractor:
             - Ollama 本身是多线程安全的
             - 可以显著减少总处理时间
         """
-        results = [None] * len(blocks)  # 预分配结果数组
-        total = len(blocks)
+        results = [None] * len(events)  # 预分配结果数组
+        total = len(events)
         completed = 0
         
         if show_progress:
-            print(f"🚀 开始并发处理 {total} 个 blocks（并发数: {max_workers}）...")
+            print(f"🚀 开始并发处理 {total} 个 events（并发数: {max_workers}）...")
         
         start_time = time.time()
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # 提交所有任务，保存 future -> (index, block) 映射
+            # 提交所有任务，保存 future -> (index, event) 映射
             future_to_index = {
-                executor.submit(self._extract_single_safe, block): (idx, block)
-                for idx, block in enumerate(blocks)
+                executor.submit(self._extract_single_safe, event): (idx, event)
+                for idx, event in enumerate(events)
             }
             
             # 处理完成的任务
             for future in as_completed(future_to_index):
-                idx, block = future_to_index[future]
+                idx, event = future_to_index[future]
                 completed += 1
                 
                 try:
@@ -133,20 +132,20 @@ class AnchorExtractor:
                     results[idx] = result
                     
                     if show_progress:
-                        block_id = block.get('block_id', 'unknown')
+                        event_id = event.get('event_id', 'unknown')
                         inference_time = result.get('inference_time', 0)
-                        print(f"✅ [{completed}/{total}] {block_id} 完成 (耗时: {inference_time:.2f}s)")
+                        print(f"✅ [{completed}/{total}] {event_id} 完成 (耗时: {inference_time:.2f}s)")
                         
                 except Exception as e:
-                    block_id = block.get('block_id', 'unknown')
+                    event_id = event.get('event_id', 'unknown')
                     error_result = {
-                        "block_id": block_id,
+                        "event_id": event_id,
                         "error": str(e)
                     }
                     results[idx] = error_result
                     
                     if show_progress:
-                        print(f"❌ [{completed}/{total}] {block_id} 失败: {str(e)}")
+                        print(f"❌ [{completed}/{total}] {event_id} 失败: {str(e)}")
         
         total_time = time.time() - start_time
         
@@ -154,47 +153,47 @@ class AnchorExtractor:
             avg_time = total_time / total if total > 0 else 0
             print(f"\n✅ 批量处理完成！")
             print(f"   总耗时: {total_time:.2f}s")
-            print(f"   平均耗时: {avg_time:.2f}s/block")
-            print(f"   加速比: ~{len(blocks) * 8 / total_time:.1f}x（相比顺序处理）")
+            print(f"   平均耗时: {avg_time:.2f}s/event")
+            print(f"   加速比: ~{len(events) * 8 / total_time:.1f}x（相比顺序处理）")
         
         return results
     
-    def _extract_single_safe(self, block: Dict[str, Any]) -> Dict[str, Any]:
+    def _extract_single_safe(self, event: Dict[str, Any]) -> Dict[str, Any]:
         """
-        安全地抽取单个 block（用于并发调用）
+        安全地抽取单个 event（用于并发调用）
         
         Args:
-            block: 语义块
+            event: 事件
             
         Returns:
             抽取结果
         """
         try:
-            return self.extract_anchors(block)
+            return self.extract_anchors(event)
         except Exception as e:
             return {
-                "block_id": block.get("block_id", "unknown"),
+                "event_id": event.get("event_id", "unknown"),
                 "error": str(e)
             }
     
-    def _validate_input(self, block: Dict[str, Any]):
+    def _validate_input(self, event: Dict[str, Any]):
         """
         验证输入格式
         
         Args:
-            block: 输入的语义块
+            event: 输入的事件
         
         Raises:
             ValueError: 输入格式不正确
         """
-        required_fields = ["block_id", "text", "source", "publish_date"]
+        required_fields = ["event_id", "event_description"]
         
         for field in required_fields:
-            if field not in block:
+            if field not in event:
                 raise ValueError(f"输入缺少必需字段: {field}")
         
-        if not block["text"] or not block["text"].strip():
-            raise ValueError("text 字段不能为空")
+        if not event["event_description"] or not event["event_description"].strip():
+            raise ValueError("event_description 字段不能为空")
 
 
 # ============================================================================

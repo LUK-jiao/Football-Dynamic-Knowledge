@@ -22,54 +22,66 @@ except ImportError:
 
 
 # ============================================================================
-# 测试数据
+# 测试数据（Event 格式 - 从 Event Decomposition Layer 输出）
 # ============================================================================
 
-TEST_BLOCKS = [
+TEST_EVENTS = [
     # 测试 1: 转会新闻（EVENT - 明确时间点）
     {
-        "block_id": "test_transfer_event",
-        "text": "Matthijs de Ligt completes €50m move from Bayern Munich to Manchester United on July 30, 2024. The 25-year-old defender signs a five-year deal until June 2029.",
+        "event_id": "001-1",
+        "title_anchors": "De Ligt Transfer to Manchester United",
+        "event_description": "Matthijs de Ligt completes €50m move from Bayern Munich to Manchester United on July 30, 2024.",
+        "block_text": "Matthijs de Ligt completes €50m move from Bayern Munich to Manchester United on July 30, 2024. The 25-year-old defender signs a five-year deal until June 2029.",
         "source": "BBC Sport",
         "publish_date": "2024-07-30"
     },
     
     # 测试 2: 比赛结果（EVENT - 历史事实）
     {
-        "block_id": "test_match_event",
-        "text": "Arsenal won 3-2 against Chelsea at Emirates Stadium. Saka scored two goals in the match.",
+        "event_id": "002-1",
+        "title_anchors": "Arsenal vs Chelsea Match Result",
+        "event_description": "Arsenal won 3-2 against Chelsea at Emirates Stadium, with Saka scoring two goals.",
+        "block_text": "Arsenal won 3-2 against Chelsea at Emirates Stadium. Saka scored two goals in the match.",
         "source": "Sky Sports",
         "publish_date": "2025-01-20"
     },
     
     # 测试 3: 教练身份（STATE - 无结束时间）
     {
-        "block_id": "test_coach_state",
-        "text": "Ruben Amorim is the head coach of Manchester United. He joined the club from Sporting CP.",
+        "event_id": "003-1",
+        "title_anchors": "Ruben Amorim Manchester United Manager",
+        "event_description": "Ruben Amorim is the head coach of Manchester United, joining from Sporting CP.",
+        "block_text": "Ruben Amorim is the head coach of Manchester United. He joined the club from Sporting CP.",
         "source": "Official",
         "publish_date": "2024-11-01"
     },
     
     # 测试 4: 合同状态（STATE - 有结束时间）
     {
-        "block_id": "test_contract_state",
-        "text": "De Ligt signed a contract with Manchester United until 2029.",
+        "event_id": "004-1",
+        "title_anchors": "De Ligt Contract Extension",
+        "event_description": "De Ligt signed a contract with Manchester United until 2029.",
+        "block_text": "De Ligt signed a contract with Manchester United until 2029.",
         "source": "ESPN",
         "publish_date": "2024-07-30"
     },
     
     # 测试 5: 伤病状态（STATE - 无结束时间）
     {
-        "block_id": "test_injury_state",
-        "text": "Mohamed Salah is currently injured and unavailable for selection.",
+        "event_id": "005-1",
+        "title_anchors": "Salah Injury Update",
+        "event_description": "Mohamed Salah is currently injured and unavailable for selection.",
+        "block_text": "Mohamed Salah is currently injured and unavailable for selection.",
         "source": "Liverpool FC Official",
         "publish_date": "2025-01-15"
     },
     
     # 测试 6: 历史进球（EVENT）
     {
-        "block_id": "test_historical_event",
-        "text": "Taty Castellanos scored four goals against Real Madrid in the 2023 Copa del Rey.",
+        "event_id": "006-1",
+        "title_anchors": "Castellanos Four Goals vs Real Madrid",
+        "event_description": "Taty Castellanos scored four goals against Real Madrid in the 2023 Copa del Rey.",
+        "block_text": "Taty Castellanos scored four goals against Real Madrid in the 2023 Copa del Rey.",
         "source": "Marca",
         "publish_date": "2023-05-20"
     },
@@ -80,32 +92,34 @@ TEST_BLOCKS = [
 # 测试函数
 # ============================================================================
 
-def test_prompt_display(block: Dict[str, Any]):
+def test_prompt_display(event: Dict[str, Any]):
     """测试 Prompt 显示"""
     print("=" * 100)
     print("测试 2: Prompt 显示")
     print("=" * 100)
     print()
     
-    print(f"Block ID: {block['block_id']}")
-    print(f"文本: {block['text'][:100]}...")
+    print(f"Event ID: {event['event_id']}")
+    print(f"Title: {event['title_anchors']}")
+    print(f"描述: {event['event_description'][:100]}...")
     print()
     
-    print_prompt(block)
+    print_prompt(event)
 
 
-def test_backend_extraction(block: Dict[str, Any], model: str = "llama3.2:latest"):
+def test_backend_extraction(event: Dict[str, Any], model: str = "llama3:latest"):
     """测试 Backend 抽取"""
     print("=" * 100)
-    print(f"测试 3: Backend 提取 - {block['block_id']}")
+    print(f"测试 3: Backend 提取 - {event['event_id']}")
     print("=" * 100)
     print()
     
-    print(f"Block ID: {block['block_id']}")
-    print(f"文本长度: {len(block['text'])} 字符")
+    print(f"Event ID: {event['event_id']}")
+    print(f"Title: {event['title_anchors']}")
+    print(f"描述长度: {len(event['event_description'])} 字符")
     print()
-    print("文本内容:")
-    print(block['text'])
+    print("事件描述:")
+    print(event['event_description'])
     print()
     print("-" * 100)
     print("调用 Ollama Backend...")
@@ -117,7 +131,7 @@ def test_backend_extraction(block: Dict[str, Any], model: str = "llama3.2:latest
         start_time = time.time()
         
         backend = OllamaBackend(model=model)
-        result = backend.extract_anchors(block)
+        result = backend.extract_anchors(event)
         
         # 计算推理时间
         inference_time = time.time() - start_time
@@ -138,8 +152,9 @@ def test_backend_extraction(block: Dict[str, Any], model: str = "llama3.2:latest
         
         # 分析结果
         print("📊 结果分析:")
+        print(f"  - Event ID: {result.get('event_id')}")
+        print(f"  - Title Anchors: {result.get('title_anchors')}")
         print(f"  - Fact Type: {result.get('fact_type')}")
-        print(f"  - Need Resolver: {result.get('need_resolver')}")
         print(f"  - Participants: {len(result.get('anchors', {}).get('participants', []))}")
         print(f"  - Temporal Anchors: {len(result.get('anchors', {}).get('temporal_anchors', []))}")
         print(f"  - Constraints: {len(result.get('anchors', {}).get('constraints', []))}")
@@ -150,19 +165,21 @@ def test_backend_extraction(block: Dict[str, Any], model: str = "llama3.2:latest
         
     except Exception as e:
         print(f"❌ 提取失败: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
-def test_anchor_extractor(block: Dict[str, Any], model: str = "llama3.2:latest"):
+def test_anchor_extractor(event: Dict[str, Any], model: str = "llama3:latest"):
     """测试 AnchorExtractor"""
     print("=" * 100)
-    print(f"测试 4: AnchorExtractor - {block['block_id']}")
+    print(f"测试 4: AnchorExtractor - {event['event_id']}")
     print("=" * 100)
     print()
     
     try:
         extractor = AnchorExtractor(model=model)
-        result = extractor.extract_anchors(block)
+        result = extractor.extract_anchors(event)
         
         print("✅ 抽取成功")
         print(json.dumps(result, indent=2, ensure_ascii=False))
@@ -175,27 +192,26 @@ def test_anchor_extractor(block: Dict[str, Any], model: str = "llama3.2:latest")
         return None
 
 
-def test_batch_processing(blocks: list, model: str = "llama3.2:latest"):
+def test_batch_processing(events: list, model: str = "llama3:latest"):
     """测试批量处理"""
     print("=" * 100)
     print("测试 5: 批量处理")
     print("=" * 100)
     print()
     
-    print(f"待处理 blocks: {len(blocks)}")
+    print(f"待处理 events: {len(events)}")
     print()
     
     try:
         extractor = AnchorExtractor(model=model)
-        results = extractor.extract_anchors_batch(blocks)
+        results = extractor.extract_anchors_batch(events)
         
-        print(f"✅ 批量处理完成，处理 {len(results)} 个 blocks")
+        print(f"✅ 批量处理完成，处理 {len(results)} 个 events")
         print()
         
         # 统计结果
         event_count = 0
         state_count = 0
-        need_resolver_count = 0
         error_count = 0
         total_inference_time = 0
         
@@ -208,11 +224,17 @@ def test_batch_processing(blocks: list, model: str = "llama3.2:latest"):
                 elif result.get("fact_type") == "STATE":
                     state_count += 1
                 
-                if result.get("need_resolver"):
-                    need_resolver_count += 1
-                
                 # 累加推理时间
                 total_inference_time += result.get("inference_time", 0)
+        
+        print("📊 批量处理统计:")
+        print(f"  - 总数: {len(results)}")
+        print(f"  - EVENT: {event_count}")
+        print(f"  - STATE: {state_count}")
+        print(f"  - 错误: {error_count}")
+        print(f"  - 总推理时间: {total_inference_time:.2f} 秒")
+        print(f"  - 平均推理时间: {total_inference_time / len(results):.2f} 秒")
+        print()
         
         return results
         
@@ -230,17 +252,17 @@ def test_edge_cases():
     
     extractor = AnchorExtractor()
     
-    # 测试空文本
-    print("📋 测试 6.1: 空文本")
-    empty_block = {
-        "block_id": "empty",
-        "text": "",
+    # 测试空描述
+    print("📋 测试 6.1: 空描述")
+    empty_event = {
+        "event_id": "empty",
+        "event_description": "",
         "source": "Test",
         "publish_date": "2025-01-01"
     }
     
     try:
-        result = extractor.extract_anchors(empty_block)
+        result = extractor.extract_anchors(empty_event)
         print("❌ 应该抛出 ValueError")
     except ValueError as e:
         print(f"✅ 正确抛出异常: {str(e)}")
@@ -249,19 +271,19 @@ def test_edge_cases():
     
     # 测试缺少字段
     print("📋 测试 6.2: 缺少必需字段")
-    incomplete_block = {
-        "block_id": "incomplete",
-        "text": "Some text"
+    incomplete_event = {
+        "event_id": "incomplete",
+        "title_anchors": "Some title"
     }
     
     try:
-        result = extractor.extract_anchors(incomplete_block)
+        result = extractor.extract_anchors(incomplete_event)
         print("❌ 应该抛出 ValueError")
     except ValueError as e:
         print(f"✅ 正确抛出异常: {str(e)}")
 
 
-def run_all_tests(model: str = "llama3.2:latest", skip_llm: bool = False):
+def run_all_tests(model: str = "llama3:latest", skip_llm: bool = False):
     """运行所有测试"""
     print()
     print("🚀 开始运行测试套件")
@@ -269,12 +291,12 @@ def run_all_tests(model: str = "llama3.2:latest", skip_llm: bool = False):
     
     # 测试 3-4: Backend 和 Extractor（每个测试场景）
     if not skip_llm:
-        for block in TEST_BLOCKS:
-            test_backend_extraction(block, model)
+        for event in TEST_EVENTS:
+            test_backend_extraction(event, model)
             print()
         
         # 测试 5: 批量处理
-        test_batch_processing(TEST_BLOCKS, model)
+        test_batch_processing(TEST_EVENTS, model)
         print()
     
     # 测试 6: 边界情况
@@ -294,24 +316,22 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="Test Football Anchor Extraction")
-    parser.add_argument("--model", type=str, default="gemma3:12b", help="Ollama 模型名称")
+    parser.add_argument("--model", type=str, default="llama3:latest", help="Ollama 模型名称")
     parser.add_argument("--skip-llm", action="store_true", help="跳过 LLM 相关测试")
-    parser.add_argument("--test", type=str, choices=["connection", "prompt", "backend", "extractor", "batch", "edge", "all"], 
+    parser.add_argument("--test", type=str, choices=["prompt", "backend", "extractor", "batch", "edge", "all"], 
                         default="all", help="运行特定测试")
     
     args = parser.parse_args()
     
     # 运行特定测试
-    if args.test == "connection":
-        test_ollama_connection(args.model)
-    elif args.test == "prompt":
-        test_prompt_display(TEST_BLOCKS[0])
+    if args.test == "prompt":
+        test_prompt_display(TEST_EVENTS[0])
     elif args.test == "backend":
-        test_backend_extraction(TEST_BLOCKS[0], args.model)
+        test_backend_extraction(TEST_EVENTS[0], args.model)
     elif args.test == "extractor":
-        test_anchor_extractor(TEST_BLOCKS[0], args.model)
+        test_anchor_extractor(TEST_EVENTS[0], args.model)
     elif args.test == "batch":
-        test_batch_processing(TEST_BLOCKS, args.model)
+        test_batch_processing(TEST_EVENTS, args.model)
     elif args.test == "edge":
         test_edge_cases()
     else:

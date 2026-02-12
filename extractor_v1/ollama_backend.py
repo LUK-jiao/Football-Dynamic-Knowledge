@@ -10,14 +10,27 @@ from typing import Dict, Any, Optional
 import ollama
 
 SYSTEM_PROMPT = """You are a football-domain information extraction agent.
-Extract structured anchors from ONE semantic block and output a COMPLETE JSON.
+Extract structured anchors from ONE football event and output a COMPLETE JSON.
+
+=====================
+INPUT STRUCTURE
+=====================
+
+You will receive a single EVENT with:
+- event_id: unique identifier
+- title_anchors: contextual scope (e.g., "Arsenal vs Palace EFL Cup")
+- event_description: THE PRIMARY TEXT FOR NER (one sentence describing the event)
+- block_text: full original text (for reference only)
+- source: information source
+- publish_date: publication date
 
 =====================
 OUTPUT JSON SCHEMA
 =====================
 {
-  "block_id": "...",
-  "text": "...",
+  "event_id": "...",
+  "title_anchors": "...",
+  "event_description": "...",
   "source": "...",
   "publish_date": "...",
   "anchors": {
@@ -45,53 +58,78 @@ OUTPUT JSON SCHEMA
 CRITICAL RULES
 =====================
 
-1️⃣ PARTICIPANTS
-- Extract ALL explicitly mentioned entities (players, clubs, teams, coaches, etc.).
-- Convert nicknames to official names (e.g. "the Gunners" → "Arsenal").
-- Team / club nicknames MUST be type "Team" or "Club", NEVER "Player".
-- Do NOT invent entities or use external knowledge.
+1️⃣ PRIMARY NER SOURCE: event_description
+- Perform Named Entity Recognition PRIMARILY on event_description
+- This is the cleanest, most focused text for extraction
+- Use block_text ONLY as supplementary context if needed
 
-2️⃣ CONSTRAINTS (STRICT)
-- Extract ONLY facts EXPLICITLY stated in the text. NO inference.
+2️⃣ PARTICIPANTS
+- Extract ALL explicitly mentioned entities from event_description
+- Convert nicknames to official names (e.g. "the Gunners" → "Arsenal")
+- Team / club nicknames MUST be type "Club", NEVER "Player"
+- Include entities from title_anchors if they provide context
+- Do NOT invent entities or use external knowledge
+
+3️⃣ CONSTRAINTS (STRICT)
+- Extract ONLY facts EXPLICITLY stated in event_description
+- NO inference beyond the text
 - Each constraint MUST satisfy ALL of the following:
   - subject is NOT empty
   - subject EXACTLY matches a name in participants
   - subject is NOT a generic word (❌ "match", "transfer", "semi-final")
-- If text states a role (e.g. "is manager/coach"):
-  → use CONTRACT_STATUS or ROLE-equivalent constraint with explicit wording only.
+- If event_description states a role (e.g. "is manager/coach"):
+  → use CONTRACT_STATUS or ROLE-equivalent constraint with explicit wording only
 
-3️⃣ TEMPORAL ANCHORS
-- Extract ONLY explicit dates/times from text.
-- Format strictly as YYYY-MM-DD.
-- Do NOT use publish_date as event time.
+4️⃣ TEMPORAL ANCHORS
+- Extract ONLY explicit dates/times from event_description
+- Format strictly as YYYY-MM-DD
+- Do NOT use publish_date as event time
+- Use block_text for additional temporal context if needed
 
-4️⃣ SOURCES
-- Always generate from input `source` field.
+5️⃣ SOURCES
+- Always generate from input `source` field
 
-5️⃣ FACT TYPE
-- EVENT: completed or scheduled factual events (signed, agreed, won, played).
-- STATE: time-dependent conditions (contract, injury, role, suspension).
+6️⃣ FACT TYPE
+- EVENT: completed or scheduled factual events (signed, agreed, won, scored, played)
+- STATE: time-dependent conditions (contract, injury, role, suspension)
 
 =====================
 HARD REQUIREMENTS
 =====================
-- Copy block_id, text, source, publish_date EXACTLY as input.
-- ALL top-level fields MUST exist.
-- Use [] for empty arrays.
-- constraints array MUST contain ≥1 item.
-- NEVER hallucinate facts, entities, dates, or states.
+- Copy event_id, title_anchors, event_description, source, publish_date EXACTLY as input
+- ALL top-level fields MUST exist
+- Use [] for empty arrays
+- constraints array MUST contain ≥1 item
+- NEVER hallucinate facts, entities, dates, or states
 - Output JSON ONLY. No explanations.
+
+=====================
+EXTRACTION WORKFLOW
+=====================
+
+Step 1: Read event_description carefully - this is your PRIMARY input
+Step 2: Extract all named entities (people, clubs, competitions, locations)
+Step 3: Identify temporal expressions
+Step 4: Determine fact_type (EVENT or STATE)
+Step 5: Generate constraints based on the facts stated
+Step 6: Cross-check with title_anchors for context
+Step 7: Use block_text ONLY if additional context is needed
 """
 
 # ============================================================================
-# Developer Prompt - 针对单个 block 的动态提示
+# Developer Prompt - 针对单个 event 的动态提示
 # ============================================================================
 
-DEVELOPER_PROMPT = """Input:
-ID: {block_id} | Source: {source} | Date: {publish_date}
-Text: {text}
+DEVELOPER_PROMPT = """Input Event:
+Event ID: {event_id}
+Title Anchors: {title_anchors}
+Event Description: {event_description}
+Source: {source}
+Publish Date: {publish_date}
 
-Output JSON (constraints in anchors, fact_type required):
+(Block Text for reference: {block_text})
+
+Output JSON (extract anchors from event_description, fact_type required):
 """
 
 
@@ -99,34 +137,54 @@ Output JSON (constraints in anchors, fact_type required):
 # Event Decomposition Prompts (事件分解层)
 # ============================================================================
 
-EVENT_DECOMPOSITION_SYSTEM_PROMPT = """You are an event decomposition agent for football domain news.
+EVENT_DECOMPOSITION_SYSTEM_PROMPT = """You are a FOOTBALL EVENT DECOMPOSITION AGENT.
 
-Your ONLY job is to decompose one semantic block into structured event units.
+Your task is to convert a football-related semantic block into 1–N structured event units.
 
-You operate at the STRUCTURE layer only.
-You do NOT extract time anchors, states, or constraints.
-You do NOT perform fact interpretation.
+This module is DOMAIN-GENERIC.
+It must work for:
+
+transfers
+
+matches
+
+goals
+
+contracts
+
+injuries
+
+suspensions
+
+managerial appointments
+
+official statements
+
+regulatory decisions
 
 ==================================================
-OUTPUT FORMAT (STRICT JSON ONLY)
+INPUT
+
+You will receive:
+
+block_id
+
+title
+
+text (original semantic block)
+
+source
+
+publish_date
+
 ==================================================
-
-Return ONLY valid JSON.
-
-No explanations.
-No markdown.
-No comments.
-No trailing commas.
-No text before or after JSON.
-
-Structure:
+OUTPUT JSON SCHEMA (STRICT)
 
 {
   "events": [
     {
       "event_id": "string",
-      "parent_event_id": "string | null",
-      "is_sub_event": boolean,
+      "title_anchors": "string",
       "event_description": "string",
       "block_text": "string",
       "source": "string",
@@ -136,170 +194,218 @@ Structure:
 }
 
 ==================================================
-CORE RESPONSIBILITIES
+MODULE RESPONSIBILITY (BOUNDARY)
+
+This module ONLY does:
+
+event splitting
+
+event semantic compression (event_description generation)
+
+title-based contextual anchoring
+
+This module MUST NOT do:
+
+parent–child modeling
+
+time normalization
+
+state judgment
+
+constraint extraction
+
+entity normalization
+
+inference beyond explicit text
+
 ==================================================
+CORE PRINCIPLE
 
-You must perform THREE steps:
+You are an INDEXING LAYER, not a FACT REASONER.
 
-1) Identify distinct atomic football events.
-2) Decide whether a minimal context event is required.
-3) Assign parent-child structure accordingly.
+Each event_description must be:
 
---------------------------------------------------
-STEP 1 — EVENT SPLITTING
---------------------------------------------------
+strictly grounded in explicit text
 
-• Split only when there are clearly distinct football actions or facts.
-• Each event must be semantically self-contained.
-• If uncertain → DO NOT split.
+self-contained
 
-Distinct event examples:
-- A transfer agreement
-- A goal
-- A contract signing
-- A managerial appointment
-- A match result
-- A penalty shoot-out
-- A disciplinary action
-- An injury confirmation
+NER-extractable
 
-Do NOT split:
-- Pure stylistic narration
-- Emotional commentary
-- Tactical description without discrete action
+suitable as the primary input for downstream modules
 
---------------------------------------------------
-STEP 2 — MINIMAL CONTEXT EVENT (IMPORTANT)
---------------------------------------------------
+==================================================
+1️⃣ EVENT SPLITTING RULES
 
-If the block contains MULTIPLE related events within the same football scenario
-(e.g., same match, same transfer deal, same contract negotiation):
+One semantic block can produce 1 to N events.
 
-You MUST create ONE minimal abstract context event.
+Each event represents ONE clear football-related fact or action.
 
-This context event:
+Split events ONLY when:
 
-• Represents the shared scenario.
-• Must be neutral and factual.
-• Must NOT summarize the whole block.
-• Must NOT add interpretation.
-• Must NOT include narrative tone.
+actions are logically independent, OR
+
+multiple distinct football facts are stated.
+
+If the block describes a single fact → produce ONE event.
+If uncertain → DO NOT split.
+
+==================================================
+2️⃣ TITLE_ANCHORS RULE
+
+title_anchors MUST be derived from the provided title.
+
+It represents the minimal contextual scope of the block.
+
+It must be concise (not a sentence).
+
+It should typically contain:
+
+team names
+
+competition
+
+transfer context
+
+player name
+
+event type
 
 Examples:
 
-Match:
-"Arsenal vs Palace EFL Cup quarter-final"
+"Arsenal vs Crystal Palace EFL Cup quarter-final"
 
-Transfer:
-"De Ligt transfer from Bayern Munich to Manchester United"
+"De Ligt transfer to Manchester United"
 
-Contract:
-"Saka contract extension at Arsenal"
+"Chelsea managerial appointment"
 
-General:
-"Manchester City vs Liverpool Premier League match"
+"FA disciplinary decision"
 
-Context Event Rules:
-• event_id format: "<block_id>-0"
-• parent_event_id = null
-• is_sub_event = false
-• All other events must attach to this event.
+Do NOT generate narrative phrases.
+Do NOT repeat the full title verbatim if it is long.
 
-If there is ONLY ONE event in the block:
-→ DO NOT create context event.
+==================================================
+3️⃣ EVENT_DESCRIPTION RULES (CRITICAL)
 
---------------------------------------------------
-STEP 3 — PARENT STRUCTURE
---------------------------------------------------
+event_description MUST:
 
-Case A — Only one event:
-    event_id: "<block_id>-1"
-    parent_event_id: null
-    is_sub_event: false
+Be exactly ONE sentence
 
-Case B — Multiple related events:
-    Context:
-        event_id: "<block_id>-0"
-        parent_event_id: null
-        is_sub_event: false
+Be concise and information-dense
 
-    Child events:
-        event_id: "<block_id>-1", "<block_id>-2", ...
-        parent_event_id: "<block_id>-0"
-        is_sub_event: true
+Explicitly contain named entities
 
-Case C — Multiple unrelated events:
-    All events are main events.
-    No context event.
+Clearly state WHAT happened and WHO was involved
 
---------------------------------------------------
-EVENT_DESCRIPTION REQUIREMENTS
---------------------------------------------------
+Preserve explicit facts only
 
-Must:
-• Be one sentence.
-• Be factual and verifiable.
-• Contain concrete actors where possible.
-• May include score or time if explicitly stated.
-• Be 10–30 words.
-• Be compact but information-complete.
+event_description MAY include:
 
-Must NOT:
-• Add interpretation
-• Add future implications
-• Add narrative tone
-• Infer unstated facts
-• Summarize the entire block
+time expressions (as text, not normalized)
 
-Good:
-"Marc Guehi scored an equaliser in stoppage time."
-"Arsenal won the penalty shoot-out 8-7."
-"De Ligt agreed to join Manchester United from Bayern Munich."
+scores
 
-Bad:
-"Arsenal secured a dramatic victory."
-"Palace fought bravely."
-"This result keeps them on course for Wembley."
+competition names
 
---------------------------------------------------
-BLOCK_TEXT RULE
---------------------------------------------------
+locations
 
-• MUST copy the COMPLETE original input text.
-• NEVER modify it.
-• NEVER truncate it.
-• All events share identical block_text.
+event_description MUST NOT:
 
---------------------------------------------------
-CRITICAL JSON RULES
---------------------------------------------------
+add interpretation
 
-• Use double quotes only.
-• true / false must be lowercase.
-• null must be lowercase.
-• No comments.
-• No placeholders like "..."
-• No extra text.
+add emotional tone
+
+introduce future implications
+
+summarize the entire block
+
+infer unstated facts
+
+include vague wording
+
+Good examples:
+
+"Marc Guehi scored an equaliser in stoppage time"
+
+"Manchester United signed Matthijs de Ligt from Bayern Munich"
+
+"Arsenal defeated Crystal Palace 8-7 on penalties"
+
+"Chelsea appointed a new head coach"
+
+Bad examples:
+
+"A dramatic moment followed"
+
+"This secured qualification"
+
+"The team showed resilience"
+
+"The match ended in excitement"
+
+The description must be NER-ready:
+A downstream system should be able to extract:
+
+PERSON
+
+CLUB
+
+COMPETITION
+
+ACTION TYPE
+
+==================================================
+4️⃣ BLOCK_TEXT RULE
+
+block_text MUST be the FULL original input text
+
+Do NOT modify, summarize, or partially copy
+
+All events share the same block_text
+
+==================================================
+5️⃣ EVENT_ID RULE
+
+Use sequential numbering:
+"{block_id}-1"
+"{block_id}-2"
+"{block_id}-3"
+...
+
+No nesting.
+
+==================================================
+FORBIDDEN ACTIONS
+
+❌ No comments
+❌ No explanations
+❌ No placeholder values
+❌ No markdown
+
+==================================================
+OUTPUT HARD CONSTRAINTS (ABSOLUTE)
+
+Output ONLY valid JSON
+
+No prefix text
+
+No suffix text
+
+No commentary
+
+No markdown
+
+JSON must be directly parseable
+
+==================================================
+FINAL INSTRUCTION
 
 Return ONLY the JSON object.
-
-==================================================
-INPUT
-==================================================
-
-Block ID: {block_id}
-Source: {source}
-Publish Date: {publish_date}
-Text: {text}
-
-==================================================
-OUTPUT
-==================================================
-
+Nothing else.
 """
 
 EVENT_DECOMPOSITION_DEVELOPER_PROMPT = """Input:
 Block ID: {block_id}
+Title: {title}
 Source: {source}
 Publish Date: {publish_date}
 Text: {text}
@@ -338,12 +444,12 @@ class OllamaBackend:
         self.model = model
         self.host = host
         
-    def _build_messages(self, block: Dict[str, Any]) -> list:
+    def _build_messages(self, event: Dict[str, Any]) -> list:
         """
         构建两段式 Prompt 消息列表
         
         Args:
-            block: 输入的语义块（包含 block_id, text, source, publish_date）
+            event: 输入的事件（包含 event_id, title_anchors, event_description, block_text, source, publish_date）
             
         Returns:
             消息列表 [{"role": "system", "content": ...}, {"role": "user", "content": ...}]
@@ -354,12 +460,14 @@ class OllamaBackend:
             "content": SYSTEM_PROMPT
         }
         
-        # Developer Message（填充 block 数据）
+        # Developer Message（填充 event 数据）
         developer_content = DEVELOPER_PROMPT.format(
-            block_id=block.get("block_id", "N/A"),
-            source=block.get("source", "N/A"),
-            publish_date=block.get("publish_date", "N/A"),
-            text=block.get("text", "")
+            event_id=event.get("event_id", "N/A"),
+            title_anchors=event.get("title_anchors", "N/A"),
+            event_description=event.get("event_description", ""),
+            block_text=event.get("block_text", "")[:200] + "...",  # 只显示前200字符作为参考
+            source=event.get("source", "N/A"),
+            publish_date=event.get("publish_date", "N/A")
         )
         
         developer_message = {
@@ -459,18 +567,41 @@ class OllamaBackend:
         except json.JSONDecodeError as e:
             raise ValueError(f"JSON 解析失败: {str(e)}\n原始响应:\n{raw_response}")
     
-    def extract_anchors(self, block: Dict[str, Any]) -> Dict[str, Any]:
+    def extract_anchors(self, event: Dict[str, Any]) -> Dict[str, Any]:
         """
-        从单个语义块中抽取锚点
+        从单个事件中抽取锚点（Anchor Extraction Layer）
         
         Args:
-            block: 输入的语义块
+            event: 输入的事件，必须包含：
+                - event_id: 事件唯一标识
+                - title_anchors: 标题提炼（用于上下文理解）
+                - event_description: 事件描述（PRIMARY NER SOURCE）
+                - block_text: 原始文本块（参考用）
+                - source: 信息来源
+                - publish_date: 发布日期
             
         Returns:
-            包含锚点的结果 dict
+            包含锚点的结果 dict：
+            {
+                "event_id": "...",
+                "title_anchors": "...",
+                "anchors": {
+                    "participants": [...],
+                    "temporal_anchors": [...],
+                    "sources": [...],
+                    "constraints": [...]
+                },
+                "fact_type": "EVENT|STATE"
+            }
         """
+        # 验证输入
+        required_fields = ["event_id", "event_description"]
+        for field in required_fields:
+            if field not in event:
+                raise ValueError(f"Event 缺少必填字段: {field}")
+        
         # 1. 构建消息
-        messages = self._build_messages(block)
+        messages = self._build_messages(event)
         
         # 2. 调用 LLM
         raw_response = self._call_ollama(messages)
@@ -478,7 +609,11 @@ class OllamaBackend:
         # 3. 解析 JSON
         result = self._parse_json(raw_response)
         
-        # 4. 直接返回，不做任何后处理
+        # 4. 添加事件标识信息
+        result["event_id"] = event.get("event_id")
+        result["title_anchors"] = event.get("title_anchors", "N/A")
+        
+        # 5. 直接返回，不做任何后处理
         return result
     
     def decompose_events(self, block: Dict[str, Any]) -> Dict[str, Any]:
@@ -491,6 +626,7 @@ class OllamaBackend:
                 - text: 原始文本
                 - source: 信息来源
                 - publish_date: 发布日期
+                - title: 文章标题（可选）
         
         Returns:
             包含事件列表的结果 dict：
@@ -498,8 +634,7 @@ class OllamaBackend:
                 "events": [
                     {
                         "event_id": "...",
-                        "parent_event_id": "..." | null,
-                        "is_sub_event": true | false,
+                        "title_anchors": "...",
                         "event_description": "...",
                         "block_text": "...",
                         "source": "...",
@@ -525,6 +660,7 @@ class OllamaBackend:
         
         developer_content = EVENT_DECOMPOSITION_DEVELOPER_PROMPT.format(
             block_id=block.get("block_id", "N/A"),
+            title=block.get("title", "N/A"),
             source=block.get("source", "N/A"),
             publish_date=block.get("publish_date", "N/A"),
             text=block.get("text", "")
@@ -548,8 +684,8 @@ class OllamaBackend:
             raise ValueError("Event decomposition output must contain 'events' array")
         
         # 5. 验证每个 event 的必填字段
-        required_event_fields = ["event_id", "parent_event_id", "is_sub_event", 
-                                 "event_description", "block_text", "source", "publish_date"]
+        required_event_fields = ["event_id", "title_anchors", "event_description", 
+                                 "block_text", "source", "publish_date"]
         for event in result["events"]:
             for field in required_event_fields:
                 if field not in event:
@@ -588,7 +724,7 @@ def run_event_anchor_extraction(
 
 def validate_schema(result: Dict[str, Any]) -> bool:
     """
-    验证输出是否符合 Schema
+    验证输出是否符合 Schema（Event-based）
     
     Args:
         result: 抽取结果
@@ -596,7 +732,7 @@ def validate_schema(result: Dict[str, Any]) -> bool:
     Returns:
         True if valid, False otherwise
     """
-    required_fields = ["block_id", "text", "source", "publish_date", "anchors", "fact_type"]
+    required_fields = ["event_id", "title_anchors", "anchors", "fact_type"]
     
     # 检查顶层字段
     for field in required_fields:
@@ -636,15 +772,15 @@ def validate_schema(result: Dict[str, Any]) -> bool:
 # 调试工具
 # ============================================================================
 
-def print_prompt(block: Dict[str, Any]):
+def print_prompt(event: Dict[str, Any]):
     """
     打印完整的 Prompt（用于调试）
     
     Args:
-        block: 输入的语义块
+        event: 输入的事件
     """
     backend = OllamaBackend()
-    messages = backend._build_messages(block)
+    messages = backend._build_messages(event)
     
     print("=" * 100)
     print("SYSTEM PROMPT")

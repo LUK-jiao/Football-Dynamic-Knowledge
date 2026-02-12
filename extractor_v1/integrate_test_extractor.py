@@ -1,10 +1,11 @@
 """
-Integration Test: Preprocess Pipeline → Anchor Extractor
+Integration Test: Preprocess Pipeline → Event Decomposition → Anchor Extractor
 
 This test demonstrates the complete end-to-end pipeline:
 1. Raw text → Sentence Splitter → Sentences
 2. Sentences → Semantic Chunker → Semantic Blocks
-3. Semantic Blocks → Anchor Extractor → Extracted Anchors
+3. Semantic Blocks → Event Decomposition → Events
+4. Events → Anchor Extractor → Extracted Anchors
 
 Uses real Ollama LLM for full pipeline validation.
 """
@@ -29,19 +30,20 @@ logging.basicConfig(
 )
 
 
-def format_semantic_blocks_for_extractor(chunks: List[Any], source_name: str, publish_date: str) -> List[Dict[str, Any]]:
+def format_semantic_blocks_for_decomposition(chunks: List[Any], source_name: str, title: str, publish_date: str) -> List[Dict[str, Any]]:
     """
-    Convert semantic chunks from preprocess to blocks for extractor.
+    Convert semantic chunks from preprocess to blocks for event decomposition.
     
     Filters out quotes chunks as they don't contain extractable facts.
     
     Args:
         chunks: Semantic chunks from SemanticChunker
         source_name: Source name (e.g., "BBC Sport")
+        title: Article title
         publish_date: Publication date in YYYY-MM-DD format
     
     Returns:
-        List of blocks ready for AnchorExtractor (excluding quotes blocks)
+        List of blocks ready for Event Decomposition (excluding quotes blocks)
     """
     blocks = []
     filtered_count = 0
@@ -59,6 +61,7 @@ def format_semantic_blocks_for_extractor(chunks: List[Any], source_name: str, pu
             "block_id": f"block_{chunk.chunk_id}",
             "text": text,
             "source": source_name,
+            "title": title,
             "publish_date": publish_date,
             "chunk_type": chunk.chunk_type  # Keep track of chunk type
         }
@@ -79,8 +82,9 @@ def print_extraction_results(results: List[Dict[str, Any]]):
     print("="*80)
     
     for result in results:
-        print(f"\n[Block {result['block_id']}]")
-        print(f"Text: {result['text'][:100]}..." if len(result['text']) > 100 else f"Text: {result['text']}")
+        print(f"\n[Event {result['event_id']}]")
+        print(f"Title: {result.get('title_anchors', 'N/A')}")
+        print(f"Description: {result.get('event_description', 'N/A')[:100]}...")
         print(f"Fact Type: {result['fact_type']}")
         
         anchors = result.get('anchors', {})
@@ -120,10 +124,10 @@ def print_extraction_results(results: List[Dict[str, Any]]):
 
 
 def test_full_pipeline_with_extraction():
-    """Test complete pipeline: preprocess → extraction."""
+    """Test complete pipeline: preprocess → decomposition → extraction."""
     
     print("="*80)
-    print("INTEGRATION TEST: Full Pipeline (Preprocess → Extraction)")
+    print("INTEGRATION TEST: Full Pipeline (Preprocess → Decomposition → Extraction)")
     print("="*80)
     
     # ========================================================================
@@ -145,13 +149,16 @@ def test_full_pipeline_with_extraction():
     The Arsenal boss had made eight changes to his starting line-up and admitted: "It's always tough because they don't have the right chemistry when they haven't played together. But their attitude is excellent.
     "I think we had some big individual performances tonight. It's great for Gabriel Jesus tonight, after almost a year out, to start a game and make his 100th [Arsenal] appearance. The commitment within the group is incredible and I'm very happy for the boys."
     """
+    title = "Arsenal vs Crystal Palace - Match Report"
     
     source_name = "BBC Sport"
     publish_date = "2025-01-15"
     
     print(f"\nSource: {source_name}")
     print(f"Date: {publish_date}")
+    print(f"Title: {title}")
     print(f"\nOriginal text:")
+
     print(raw_text[:150] + "...")
     
     # ========================================================================
@@ -193,28 +200,57 @@ def test_full_pipeline_with_extraction():
         print(f"    • Chunk {chunk.chunk_id} ({chunk.chunk_type}): {preview}...")
     
     # ========================================================================
-    # STEP 3: Format blocks for extractor (filter quote_attribution)
+    # STEP 3: Format blocks for decomposition (filter quote_attribution)
     # ========================================================================
-    print("\n[STEP 3] Formatting blocks for extraction...")
+    print("\n[STEP 3] Formatting blocks for event decomposition...")
     
-    blocks = format_semantic_blocks_for_extractor(chunks, source_name, publish_date)
-    print(f"  ✓ Formatted {len(blocks)} blocks for extraction")
+    blocks = format_semantic_blocks_for_decomposition(chunks, source_name, title, publish_date)
+    print(f"  ✓ Formatted {len(blocks)} blocks for decomposition")
     
     # ========================================================================
-    # STEP 4: Anchor Extraction
+    # STEP 4: Event Decomposition
     # ========================================================================
-    print("\n[STEP 4] Extracting anchors from semantic blocks...")
+    print("\n[STEP 4] Decomposing blocks into events...")
     
-    extractor = AnchorExtractor(model="gemma3:12b")
+    extractor_backend = ExtractorBackend(model="llama3:latest")
     
-    # Extract anchors from all blocks
-    results = []
-    total_inference_time = 0.0
+    # Decompose each block into events
+    all_events = []
+    total_decomp_time = 0.0
     
     for i, block in enumerate(blocks, 1):
         print(f"\n  Processing block {i}/{len(blocks)}...", end=" ")
         
-        result = extractor.extract_anchors(block)
+        import time
+        start_time = time.time()
+        decomp_result = extractor_backend.decompose_events(block)
+        decomp_time = time.time() - start_time
+        total_decomp_time += decomp_time
+        
+        events = decomp_result.get('events', [])
+        all_events.extend(events)
+        
+        print(f"✓ ({len(events)} events, {decomp_time:.2f}s)")
+    
+    print(f"\n  ✓ Decomposed {len(blocks)} blocks into {len(all_events)} events")
+    print(f"  ✓ Total decomposition time: {total_decomp_time:.2f}s")
+    print(f"  ✓ Average per block: {total_decomp_time/len(blocks):.2f}s")
+    
+    # ========================================================================
+    # STEP 5: Anchor Extraction
+    # ========================================================================
+    print("\n[STEP 5] Extracting anchors from events...")
+    
+    extractor = AnchorExtractor(model="llama3:latest")
+    
+    # Extract anchors from all events
+    results = []
+    total_inference_time = 0.0
+    
+    for i, event in enumerate(all_events, 1):
+        print(f"\n  Processing event {i}/{len(all_events)} [{event['event_id']}]...", end=" ")
+        
+        result = extractor.extract_anchors(event)
         results.append(result)
         
         inference_time = result.get('inference_time', 0)
@@ -222,9 +258,9 @@ def test_full_pipeline_with_extraction():
         
         print(f"✓ ({inference_time:.2f}s)")
     
-    print(f"\n  ✓ Extracted anchors from {len(results)} blocks")
+    print(f"\n  ✓ Extracted anchors from {len(results)} events")
     print(f"  ✓ Total inference time: {total_inference_time:.2f}s")
-    print(f"  ✓ Average per block: {total_inference_time/len(results):.2f}s")
+    print(f"  ✓ Average per event: {total_inference_time/len(results):.2f}s")
     
     # ========================================================================
     # Display Results
@@ -241,9 +277,10 @@ def test_full_pipeline_with_extraction():
     assertions = [
         (len(sentences) > 0, "Should produce sentences"),
         (len(chunks) > 0, "Should produce semantic chunks"),
-        (len(blocks) > 0, "Should produce blocks for extraction"),
+        (len(blocks) > 0, "Should produce blocks for decomposition"),
+        (len(all_events) > 0, "Should produce events from decomposition"),
         (len(results) > 0, "Should produce extraction results"),
-        (len(results) == len(blocks), "All blocks should be processed"),
+        (len(results) == len(all_events), "All events should be processed"),
         (all('anchors' in r for r in results), "All results should have anchors"),
         (all('fact_type' in r for r in results), "All results should have fact_type"),
     ]
@@ -310,12 +347,14 @@ a further year. An aggressive, deep-lying forward capable of scoring and creatin
  I want to tell them that I'm going to give everything, to defend this jersey, and obviously, to achieve our goals day after day. That's 
  the most important thing.” Everyone at West Ham United would like to welcome Taty and his family to East London, and wishes him every success for his career in Claret and Blue.
 """
+    title="Taty Castellanos Joins West Ham United - Official Announcement"
     
     source_name = "West Ham Official"
     publish_date = "2025-01-09"
     
     print(f"\nSource: {source_name}")
     print(f"Date: {publish_date}")
+    print(f"Title: {title}")
     
     # Pipeline
     splitter = SentenceSplitter(min_length=10)
@@ -332,27 +371,40 @@ a further year. An aggressive, deep-lying forward capable of scoring and creatin
         preview = ' '.join(chunk.sentences)[:80]
         print(f"  • Chunk {chunk.chunk_id} ({chunk.chunk_type}): {preview}...")
     
-    blocks = format_semantic_blocks_for_extractor(chunks, source_name, publish_date)
-    print(f"[STEP 3] Formatted {len(blocks)} blocks")
+    blocks = format_semantic_blocks_for_decomposition(chunks, source_name, title, publish_date)
+    print(f"[STEP 3] Formatted {len(blocks)} blocks for decomposition")
     
-    extractor = AnchorExtractor(model="gemma3:12b")
+    # Event Decomposition
+    extractor_backend = ExtractorBackend(model="llama3:latest")
+    all_events = []
+    
+    print(f"[STEP 4] Decomposing blocks into events...")
+    import time
+    for block in blocks:
+        decomp_result = extractor_backend.decompose_events(block)
+        all_events.extend(decomp_result.get('events', []))
+    
+    print(f"  ✓ Decomposed {len(blocks)} blocks into {len(all_events)} events")
+    
+    # Anchor Extraction
+    extractor = AnchorExtractor(model="llama3:latest")
     
     results = []
     total_time = 0.0
     
-    print(f"[STEP 4] Extracting anchors...")
-    for i, block in enumerate(blocks, 1):
-        print(f"  Processing block {i}/{len(blocks)}...", end=" ")
-        result = extractor.extract_anchors(block)
+    print(f"[STEP 5] Extracting anchors from events...")
+    for i, event in enumerate(all_events, 1):
+        print(f"  Processing event {i}/{len(all_events)} [{event['event_id']}]...", end=" ")
+        result = extractor.extract_anchors(event)
         results.append(result)
         inference_time = result.get('inference_time', 0)
         total_time += inference_time
         print(f"✓ ({inference_time:.2f}s)")
     
-    print(f"\n  ✓ Extracted anchors from {len(results)} blocks")
+    print(f"\n  ✓ Extracted anchors from {len(results)} events")
     print(f"  ✓ Total inference time: {total_time:.2f}s")
     if len(results) > 0:
-        print(f"  ✓ Average per block: {total_time/len(results):.2f}s")
+        print(f"  ✓ Average per event: {total_time/len(results):.2f}s")
     
     print_extraction_results(results)
     
