@@ -201,7 +201,7 @@ def test_full_pipeline_with_extraction():
     # ========================================================================
     print("\n[STEP 4] Decomposing blocks into events...")
     
-    extractor_backend = ExtractorBackend(model="gemma3:12b")
+    extractor_backend = ExtractorBackend(model="llama3:latest")
     
     # Decompose each block into events
     all_events = []

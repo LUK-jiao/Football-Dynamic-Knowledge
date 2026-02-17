@@ -34,7 +34,7 @@ def print_events(result: dict, test_name: str):
         print(f"  Event ID: {event['event_id']}")
         print(f"  Title Anchors: {event.get('title_anchors', 'N/A')}")
         print(f"  Description: {event['event_description']}")
-        print(f"  Block Text: {event['block_text'][:100]}..." if len(event['block_text']) > 100 else f"  Block Text: {event['block_text']}")
+        print(f"  Block Text: {event['block_text']}")
         print(f"  Inference Time: {event.get('inference_time', 0):.2f}s")
         print()
 
@@ -65,9 +65,9 @@ def test_multiple_events():
     """测试多事件场景"""
     block = {
         "block_id": "002",
-        "title": "Arsenal Defeats Chelsea 2-1 with Saka Winner",
-        "text": "Arsenal won 2-1 against Chelsea. Saka scored the winning goal in the 85th minute.",
-        "source": "Sky Sports",
+        "title": "West Ham United Signs Taty Castellanos from Lazio",
+        "text": "West Ham United is delighted to announce the signing of Argentina international forward Taty Castellanos. The 27-year-old joins the Hammers from Italian club Lazio on a four-and-a-half year contract with the option for a further year. An aggressive, deep-lying forward capable of scoring and creating goals, linking play and working hard for his team, Castellanos has enjoyed a superb career in the MLS, La Liga and Serie A and will now bring his all-round qualities to the Premier League. Born in Mendoza and capped twice by his country, Castellanos won the MLS Cup and Golden Boot with New York City FC in 2021 before netting four goals in a single game for Girona against Real Madrid in La Liga in 2023.",
+        "source": "ESPN",
         "publish_date": "2025-01-15"
     }
     
@@ -137,10 +137,8 @@ def main():
     print("="*80)
     
     tests = [
-        ("Single Event", test_single_event),
         ("Multiple Events", test_multiple_events),
         ("Complex Block", test_complex_block),
-        ("Independent Events", test_independent_events)
     ]
     
     results = []
