@@ -316,27 +316,22 @@ def test_transfer_news():
     """Test pipeline with transfer news."""
     
     print("\n" + "="*80)
-    print("[TEST 2] Transfer News - Taty Castellanos")
+    print("[TEST 2] Arsenal Wins EFL Cup Quarter-Final Against Crystal Palace on Penalties")
     print("="*80)
     
     raw_text = """
-    West Ham United is delighted to announce the signing of Argentina international forward Taty Castellanos. 
-The 27-year-old joins the Hammers from Italian club Lazio on a four-and-a-half year contract with the option for 
-a further year. An aggressive, deep-lying forward capable of scoring and creating goals, linking play and working
- hard for his team, Castellanos has enjoyed a superb career in the MLS, La Liga and Serie A and will now bring his 
- all-round qualities to the Premier League. Born in Mendoza and capped twice by his country, Castellanos won the MLS 
- Cup and Golden Boot with New York City FC in 2021 before netting four goals in a single game for Girona against Real Madrid 
- in La Liga in 2023. He then scored 14 times last season as Lazio finished seventh in Serie A and reached the UEFA Europa League quarter-finals. 
- Identified as a key target by Head Coach Nuno Espírito Santo, the Hammers’ new No11 — who has signed in time to be 
- available for Tuesday evening’s Premier League match against Nottingham Forest at London Stadium — is now looking forward to pulling on a West Ham 
- shirt and showing the Claret and Blue Army what he can do. “I'm really happy because it's a very important challenge for me personally and I've 
- come to contribute, to try to help the team as much as I can,” said Castellanos. “Every match is a battle, and I'm here to contribute that, 
- to try to bring that energy, that fighting spirit I have inside, so that every match is as important and as tough as possible. I hope to 
- give my all to the fans. I've always defended the jersey of every team with the utmost responsibility, and 
- I want to tell them that I'm going to give everything, to defend this jersey, and obviously, to achieve our goals day after day. That's 
- the most important thing.” Everyone at West Ham United would like to welcome Taty and his family to East London, and wishes him every success for his career in Claret and Blue.
-"""
-    title="Taty Castellanos Joins West Ham United - Official Announcement"
+    Mikel Arteta's Arsenal side marched on to the EFL Cup semi-finals but did it the hard way by winning 8-7 on penalties against Crystal Palace, 
+    with Kepa Arrizabalaga saving the 16th spot-kick taken by Maxence Lacroix after 15 successful conversions.
+    Two late goals had resulted in a 1-1 draw after 90 minutes and a lengthy period of stoppage time.
+    The Gunners will now face rivals Chelsea to fight for a place in the final at Wembley, with the first leg of their semi-final set for Stamford Bridge on 14 January.
+    After bossing much of the quarter-final against Palace and creating the majority of big chances, Arteta's men finally found their breakthrough, which came from a corner in the 80th minute. A well-placed delivery into the box from Bukayo Saka found the head of Riccardo Calafiori and eventually went into the net off Palace centre-back Lacroix.
+    The unfortunate own goal did not dampen Palace's spirits as they went in search of an equaliser. When it finally did arrive, they had club captain Marc Guehi to thank. The England international was the first to react to a knock-on from Jefferson Lerma in the fifth minute of stoppage time.
+    A fascinating penalty shoot-out then ensued, with both sides delivering spectacular finishes to take the score to 8-7. When the own-goal scorer Lacroix stepped up to take his kick, Arsenal keeper Kepa read its direction and made the save to ensure the Gunners remain on course for their first Wembley appearance in five years.
+    This was Arsenal's second-highest scoring penalty shootout, after their 9-8 victory against Rotherham in 2003/04. Overall, the Gunners have converted 47 of their last 51 spot-kicks in shoot-outs, giving them a supreme 92 per cent conversion rate.
+    Arteta told Sky Sports after the game: "I'm very happy to be in the semi-finals. We played against a team who are hard to generate chances against. We generated a lot and we should have scored many more goals."
+    The Arsenal boss had made eight changes to his starting line-up and admitted: "It's always tough because they don't have the right chemistry when they haven't played together. But their attitude is excellent."
+    """
+    title = "Arsenal Wins EFL Cup Quarter-Final Against Crystal Palace on Penalties"
     
     source_name = "West Ham Official"
     publish_date = "2025-01-09"
@@ -475,4 +470,5 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # sys.exit(main())
+    test_transfer_news()
