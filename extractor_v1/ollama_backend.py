@@ -741,6 +741,43 @@ class OllamaBackend:
         # 5. 直接返回，不做任何后处理
         return result
     
+    def chat(self, prompt: str, temperature: float = 0.3) -> str:
+        """
+        Simple chat interface for general queries.
+        
+        Args:
+            prompt: User prompt
+            temperature: Sampling temperature (0.0-1.0)
+            
+        Returns:
+            Model response text
+        """
+        try:
+            response = ollama.chat(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                options={
+                    "temperature": temperature,
+                    "num_predict": 2000,
+                    "num_ctx": 8192
+                }
+            )
+            
+            content = response.get("message", {}).get("content", "")
+            
+            if not content:
+                raise ValueError("Ollama returned empty response")
+            
+            return content
+            
+        except Exception as e:
+            raise RuntimeError(f"Ollama API call failed: {str(e)}")
+    
     def decompose_events(self, block: Dict[str, Any]) -> Dict[str, Any]:
         """
         将语义块分解为事件单元（Event Decomposition Layer）
