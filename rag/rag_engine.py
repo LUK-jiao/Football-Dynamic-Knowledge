@@ -9,7 +9,7 @@ from typing import Dict, Any
 from rag.query_analyzer import QueryAnalyzer
 from rag.graph_retriever import GraphRetriever
 from rag.context_builder import ContextBuilder
-from extractor_v1.ollama_backend import OllamaBackend
+from rag.llm_backend import RAGLLMBackend
 
 
 class GraphRAG:
@@ -28,7 +28,7 @@ class GraphRAG:
         analyzer: QueryAnalyzer,
         retriever: GraphRetriever,
         builder: ContextBuilder,
-        llm: OllamaBackend
+        llm: RAGLLMBackend
     ):
         """
         Initialize GraphRAG engine.

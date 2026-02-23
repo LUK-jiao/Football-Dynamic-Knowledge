@@ -12,6 +12,7 @@ rag/
 ├── graph_retriever.py     # 图检索器 (参数化Cypher)
 ├── context_builder.py     # 上下文构建器 (格式化)
 ├── rag_engine.py          # RAG引擎 (编排器)
+├── llm_backend.py         # LLM后端 (Ollama接口)
 ├── utils.py               # 工具函数
 ├── example_usage.py       # 使用示例
 └── test_graphrag.py       # 单元测试
@@ -199,16 +200,15 @@ LLM (生成答案)
 
 **使用示例:**
 ```python
-from rag import QueryAnalyzer, GraphRetriever, ContextBuilder, GraphRAG
+from rag import QueryAnalyzer, GraphRetriever, ContextBuilder, GraphRAG, RAGLLMBackend
 from knowledge_graph import Neo4jWriter
-from extractor_v1.ollama_backend import OllamaBackend
 
 # 初始化组件
 analyzer = QueryAnalyzer(model="llama3:latest")
 writer = Neo4jWriter()
 retriever = GraphRetriever(writer)
 builder = ContextBuilder()
-llm = OllamaBackend(model="llama3:latest")
+llm = RAGLLMBackend(model="llama3:latest")
 
 # 创建RAG引擎
 rag = GraphRAG(analyzer, retriever, builder, llm)
@@ -224,19 +224,18 @@ print(f"基于 {len(response['retrieved_events'])} 个事件")
 
 ## 🚀 快速开始
 
-### 基本使用
+### 快速开始
 
 ```python
-from rag import QueryAnalyzer, GraphRetriever, ContextBuilder, GraphRAG
+from rag import QueryAnalyzer, GraphRetriever, ContextBuilder, GraphRAG, RAGLLMBackend
 from knowledge_graph import Neo4jWriter
-from extractor_v1.ollama_backend import OllamaBackend
 
 # 初始化
 analyzer = QueryAnalyzer()
 writer = Neo4jWriter()
 retriever = GraphRetriever(writer)
 builder = ContextBuilder()
-llm = OllamaBackend(model="llama3:latest")
+llm = RAGLLMBackend(model="llama3:latest")
 
 rag = GraphRAG(analyzer, retriever, builder, llm)
 
@@ -395,7 +394,7 @@ writer = Neo4jWriter(
 
 ```python
 analyzer = QueryAnalyzer(model="llama3:latest")
-llm = OllamaBackend(model="llama3:latest")
+llm = RAGLLMBackend(model="llama3:latest")
 ```
 
 ### 上下文限制

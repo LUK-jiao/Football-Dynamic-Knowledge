@@ -8,9 +8,8 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from rag import QueryAnalyzer, GraphRetriever, ContextBuilder, GraphRAG
+from rag import QueryAnalyzer, GraphRetriever, ContextBuilder, GraphRAG, RAGLLMBackend
 from knowledge_graph import Neo4jWriter
-from extractor_v1.ollama_backend import OllamaBackend
 from rag.utils import print_response_summary, calculate_retrieval_metrics
 
 
@@ -23,21 +22,30 @@ def test_query_analyzer():
     
     analyzer = QueryAnalyzer(model="llama3:latest")
     
-    # Test queries
+    # Test queries in English
     test_queries = [
-        "Bukayo Saka在2025年进了多少球？",  # Fact query
-        "总结一下Arsenal在2025年1月的表现",  # Summary query
-        "为什么Thomas Frank会被Tottenham解雇？"  # Analysis query
+        "How many goals did Bukayo Saka score in 2025?",
+        "Summarize Arsenal's performance in January 2025",
+        "Why was Thomas Frank fired by Tottenham?",
+        "What was the result of Arsenal vs Crystal Palace?",
+        "Recent transfer news"
     ]
     
     for i, query in enumerate(test_queries, 1):
-        print(f"\n[Test {i}] Query: {query}")
+        print(f"\n{'='*80}")
+        print(f"[Test {i}] Query: {query}")
+        print('='*80)
+        
         result = analyzer.parse(query)
-        print(f"  Entities: {result['entities']}")
-        print(f"  Time Range: {result['time_range']}")
-        print(f"  Constraints: {result['constraint_types']}")
-        print(f"  Intent: {result['intent']}")
-        print(f"  Limit: {result['limit']}")
+        
+        print(f"\n✓ Parsed Result:")
+        print(f"  - Entities: {result.get('entities', [])}")
+        print(f"  - Time Filter: {result.get('time_filter', {})}")
+        print(f"  - Constraint Types: {result.get('constraint_types', [])}")
+        print(f"  - Fact Types: {result.get('fact_types', [])}")
+        print(f"  - Intent: {result.get('intent', 'unknown')}")
+        print(f"  - Limit: {result.get('limit', 20)}")
+
 
 
 def test_graph_retriever():
@@ -55,9 +63,10 @@ def test_graph_retriever():
         {
             "name": "Retrieve by entity",
             "parsed_query": {
-                "entities": ["Arsenal"],
-                "time_range": {"start": None, "end": None},
+                "entities": [{"name": "Arsenal", "entity_type": "Club"}],
+                "time_filter": {"mode": None, "start": None, "end": None},
                 "constraint_types": [],
+                "fact_types": [],
                 "intent": "fact",
                 "limit": 5
             }
@@ -66,8 +75,9 @@ def test_graph_retriever():
             "name": "Retrieve by constraint type",
             "parsed_query": {
                 "entities": [],
-                "time_range": {"start": None, "end": None},
+                "time_filter": {"mode": None, "start": None, "end": None},
                 "constraint_types": ["MATCH_ACTION"],
+                "fact_types": [],
                 "intent": "fact",
                 "limit": 5
             }
@@ -76,8 +86,9 @@ def test_graph_retriever():
             "name": "Retrieve with time range",
             "parsed_query": {
                 "entities": [],
-                "time_range": {"start": "2025-01-01", "end": "2025-01-31"},
+                "time_filter": {"mode": "event_date", "start": "2025-01-01", "end": "2025-01-31"},
                 "constraint_types": [],
+                "fact_types": [],
                 "intent": "fact",
                 "limit": 5
             }
@@ -160,7 +171,7 @@ def test_full_graphrag_pipeline():
     writer = Neo4jWriter()
     retriever = GraphRetriever(writer)
     builder = ContextBuilder(max_events=30)
-    llm = OllamaBackend(model="llama3:latest")
+    llm = RAGLLMBackend(model="llama3:latest")
     
     # Create GraphRAG engine
     rag = GraphRAG(analyzer, retriever, builder, llm)
@@ -227,7 +238,7 @@ def test_specific_scenarios():
     writer = Neo4jWriter()
     retriever = GraphRetriever(writer)
     builder = ContextBuilder(max_events=20)
-    llm = OllamaBackend(model="llama3:latest")
+    llm = RAGLLMBackend(model="llama3:latest")
     
     rag = GraphRAG(analyzer, retriever, builder, llm)
     

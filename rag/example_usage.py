@@ -8,9 +8,8 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from rag import QueryAnalyzer, GraphRetriever, ContextBuilder, GraphRAG
+from rag import QueryAnalyzer, GraphRetriever, ContextBuilder, GraphRAG, RAGLLMBackend
 from knowledge_graph import Neo4jWriter
-from extractor_v1.ollama_backend import OllamaBackend
 
 
 def simple_example():
@@ -25,7 +24,7 @@ def simple_example():
     writer = Neo4jWriter()
     retriever = GraphRetriever(writer)
     builder = ContextBuilder()
-    llm = OllamaBackend(model="llama3:latest")
+    llm = RAGLLMBackend(model="llama3:latest")
     
     # Create GraphRAG engine
     rag = GraphRAG(analyzer, retriever, builder, llm)
@@ -55,7 +54,7 @@ def batch_example():
     writer = Neo4jWriter()
     retriever = GraphRetriever(writer)
     builder = ContextBuilder()
-    llm = OllamaBackend(model="llama3:latest")
+    llm = RAGLLMBackend(model="llama3:latest")
     
     rag = GraphRAG(analyzer, retriever, builder, llm)
     
@@ -91,7 +90,7 @@ def interactive_example():
     writer = Neo4jWriter()
     retriever = GraphRetriever(writer)
     builder = ContextBuilder()
-    llm = OllamaBackend(model="llama3:latest")
+    llm = RAGLLMBackend(model="llama3:latest")
     
     rag = GraphRAG(analyzer, retriever, builder, llm)
     
@@ -113,18 +112,22 @@ def custom_retrieval_example():
     retriever = GraphRetriever(writer)
     builder = ContextBuilder()
     
-    # Custom parsed query
+    # Custom parsed query (using new format)
     custom_query = {
-        "entities": ["Arsenal", "Crystal Palace"],
-        "time_range": {"start": "2025-01-01", "end": "2025-01-31"},
+        "entities": [
+            {"name": "Arsenal", "entity_type": "Club"},
+            {"name": "Crystal Palace", "entity_type": "Club"}
+        ],
+        "time_filter": {"mode": "event_date", "start": "2025-01-01", "end": "2025-01-31"},
         "constraint_types": ["MATCH_OUTCOME", "MATCH_ACTION"],
+        "fact_types": ["EVENT"],
         "intent": "summary",
         "limit": 10
     }
     
     print("\nCustom Query Constraints:")
     print(f"  Entities: {custom_query['entities']}")
-    print(f"  Time Range: {custom_query['time_range']}")
+    print(f"  Time Filter: {custom_query['time_filter']}")
     print(f"  Constraint Types: {custom_query['constraint_types']}")
     
     # Retrieve events

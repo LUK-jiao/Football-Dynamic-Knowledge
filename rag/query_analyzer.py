@@ -8,7 +8,7 @@ from typing import Dict, List, Any, Optional
 import json
 import re
 from datetime import datetime, timedelta
-from extractor_v1.ollama_backend import OllamaBackend
+from rag.llm_backend import RAGLLMBackend
 
 
 class QueryAnalyzer:
@@ -26,7 +26,7 @@ class QueryAnalyzer:
             model: LLM model name for parsing
             fallback_to_rules: Whether to use rule-based fallback on LLM failure
         """
-        self.llm = OllamaBackend(model=model)
+        self.llm = RAGLLMBackend(model=model, default_temperature=0.1)
         self.fallback_to_rules = fallback_to_rules
         
         # Constraint type keyword mappings
@@ -83,48 +83,130 @@ class QueryAnalyzer:
     def _parse_with_llm(self, query: str) -> Dict[str, Any]:
         """Parse query using LLM."""
         
-        prompt = f"""You are a query parser for a football knowledge graph system.
+        prompt = f"""You are a structured query parser for a football knowledge graph system.
 
-Parse the following natural language question into a structured JSON format.
+                    Your task is to convert a natural language question into a structured JSON object.
 
-Question: {query}
+                    You MUST strictly follow the schema below.
+                    You MUST return valid JSON only.
+                    Do NOT include explanations.
+                    Do NOT wrap the output in markdown.
+                    Do NOT include any extra text.
 
-Extract:
-1. entities: List of person names, club names mentioned (use original names, not nicknames)
-2. time_range: {{start: YYYY-MM-DD or null, end: YYYY-MM-DD or null}}
-   - "2025年" → {{"start": "2025-01-01", "end": "2025-12-31"}}
-   - "最近" → last 30 days
-   - "上个月" → previous month
-   - "执教期间" / "转会窗口期" → null (cannot determine specific dates)
-3. constraint_types: List from [MATCH_ACTION, MATCH_OUTCOME, MATCH_CONTEXT, PLAYER_MOVEMENT, CONTRACT_EVENT, AVAILABILITY_EVENT, APPOINTMENT_EVENT, PERFORMANCE_EVENT, ADMINISTRATIVE_EVENT]
-   - "进球" → MATCH_ACTION
-   - "转会" → PLAYER_MOVEMENT
-   - "任命" → APPOINTMENT_EVENT
-4. intent: "fact" (specific events) / "summary" (overview) / "analysis" (why/how)
-   - "总结", "表现如何" → summary
-   - "为什么", "影响" → analysis
-   - otherwise → fact
-5. limit: default 20, increase to 50 if summary/analysis
+                    Convert the following user question into a structured query.
 
-Output ONLY valid JSON in this exact format:
-{{
-    "entities": ["Entity1", "Entity2"],
-    "time_range": {{"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}},
-    "constraint_types": ["TYPE1", "TYPE2"],
-    "intent": "fact",
-    "limit": 20
-}}
+                    Knowledge Graph Schema:
 
-If no entities found, use empty list [].
-If no time constraint, use {{"start": null, "end": null}}.
-If no constraint types, use empty list [].
-"""
+                    1) Event node:
+                    - event_id
+                    - event_description
+                    - fact_type: EVENT | RELATION | STATE
+                    - event_date
+                    - valid_from
+                    - valid_to
+
+                    2) Entity node:
+                    - name
+                    - type: Person | Club | NationalTeam | Competition | Stadium
+
+                    3) ConstraintAnchor types (ONLY choose from these 9):
+                    - MATCH_ACTION
+                    - MATCH_OUTCOME
+                    - MATCH_CONTEXT
+                    - PLAYER_MOVEMENT
+                    - CONTRACT_EVENT
+                    - AVAILABILITY_EVENT
+                    - APPOINTMENT_EVENT
+                    - PERFORMANCE_EVENT
+                    - ADMINISTRATIVE_EVENT
+
+                    ---
+
+                    Output JSON schema (strictly follow this):
+
+                    {{
+                    "entities": [
+                        {{
+                        "name": string,
+                        "entity_type": "Person" | "Club" | "NationalTeam" | "Competition" | "Stadium" | null
+                        }}
+                    ],
+
+                    "constraint_types": [
+                        "MATCH_ACTION" |
+                        "MATCH_OUTCOME" |
+                        "MATCH_CONTEXT" |
+                        "PLAYER_MOVEMENT" |
+                        "CONTRACT_EVENT" |
+                        "AVAILABILITY_EVENT" |
+                        "APPOINTMENT_EVENT" |
+                        "PERFORMANCE_EVENT" |
+                        "ADMINISTRATIVE_EVENT"
+                    ],
+
+                    "fact_types": [
+                        "EVENT" | "RELATION" | "STATE"
+                    ],
+
+                    "time_filter": {{
+                        "mode": "event_date" | "valid_range" | null,
+                        "start": "YYYY-MM-DD" | null,
+                        "end": "YYYY-MM-DD" | null
+                    }},
+
+                    "intent": "fact" | "summary" | "analysis"
+                    }}
+
+                    ---
+
+                    Parsing Rules:
+
+                    1. Extract only football-related entities.
+                    2. Do NOT extract dates as entities.
+                    3. constraint_types must be chosen ONLY from the allowed list.
+                    4. If no constraint type is clearly implied, return empty list [].
+                    5. fact_types:
+                    - Use "EVENT" for match results, goals, transfers, appointments.
+                    - Use "STATE" for roles or statuses.
+                    - If unclear, default to ["EVENT"].
+                    6. time_filter:
+                    - If a specific year is mentioned, convert to:
+                        start = YYYY-01-01
+                        end   = YYYY-12-31
+                    - If a specific month is mentioned:
+                        convert to first and last day of that month.
+                    - If no time expression is present:
+                        set mode=null, start=null, end=null.
+                    7. intent:
+                    - If the question asks to list specific facts → "fact"
+                    - If it asks to summarize performance or period → "summary"
+                    - If it asks why / impact / analysis → "analysis"
+
+                    If something is unknown, use null or empty list.
+                    Do NOT invent data.
+                    Return valid JSON only.
+
+                    User Question:
+                    "{query}" """
         
-        response = self.llm.chat(prompt, temperature=0.1)
+        response = self.llm.generate_structured(prompt, temperature=0.1)
         
         # Extract JSON from response
         json_str = self._extract_json(response)
         result = json.loads(json_str)
+        
+        # Print raw LLM output for debugging
+        print(f"\n📄 Raw LLM JSON Output:")
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        print()
+        
+        # Add default limit if not present
+        if "limit" not in result:
+            intent = result.get("intent", "fact")
+            if intent in ["summary", "analysis"]:
+                result["limit"] = 50
+            else:
+                result["limit"] = 20
         
         return result
     
@@ -138,7 +220,7 @@ If no constraint types, use empty list [].
     
     def _validate_parsed_result(self, result: Dict[str, Any]) -> bool:
         """Validate parsed result structure."""
-        required_keys = ["entities", "time_range", "constraint_types", "intent", "limit"]
+        required_keys = ["entities", "constraint_types", "intent"]
         
         if not all(key in result for key in required_keys):
             return False
@@ -146,16 +228,21 @@ If no constraint types, use empty list [].
         if not isinstance(result["entities"], list):
             return False
         
-        if not isinstance(result["time_range"], dict):
-            return False
+        # Validate entities structure
+        for entity in result["entities"]:
+            if isinstance(entity, dict):
+                if "name" not in entity:
+                    return False
+        
+        # Validate time_filter if present
+        if "time_filter" in result:
+            if not isinstance(result["time_filter"], dict):
+                return False
         
         if not isinstance(result["constraint_types"], list):
             return False
         
         if result["intent"] not in ["fact", "summary", "analysis"]:
-            return False
-        
-        if not isinstance(result["limit"], int):
             return False
         
         return True
@@ -165,11 +252,12 @@ If no constraint types, use empty list [].
         
         result = self._get_empty_structure()
         
-        # Extract entities (simple pattern matching)
-        result["entities"] = self._extract_entities_rules(query)
+        # Extract entities (simple pattern matching) - return as objects
+        entity_names = self._extract_entities_rules(query)
+        result["entities"] = [{"name": name, "entity_type": None} for name in entity_names]
         
         # Extract time range
-        result["time_range"] = self._extract_time_range_rules(query)
+        result["time_filter"] = self._extract_time_range_rules(query)
         
         # Extract constraint types
         result["constraint_types"] = self._extract_constraint_types_rules(query)
@@ -212,7 +300,7 @@ If no constraint types, use empty list [].
     
     def _extract_time_range_rules(self, query: str) -> Dict[str, Optional[str]]:
         """Extract time range using rules."""
-        time_range = {"start": None, "end": None}
+        time_filter = {"mode": None, "start": None, "end": None}
         
         today = datetime.now().date()
         
@@ -220,32 +308,36 @@ If no constraint types, use empty list [].
         year_match = re.search(r'(\d{4})年', query)
         if year_match:
             year = year_match.group(1)
-            time_range["start"] = f"{year}-01-01"
-            time_range["end"] = f"{year}-12-31"
-            return time_range
+            time_filter["mode"] = "event_date"
+            time_filter["start"] = f"{year}-01-01"
+            time_filter["end"] = f"{year}-12-31"
+            return time_filter
         
         # Check for "最近" (recent)
-        if "最近" in query:
-            time_range["start"] = (today - timedelta(days=30)).isoformat()
-            time_range["end"] = today.isoformat()
-            return time_range
+        if "最近" in query or "recent" in query.lower():
+            time_filter["mode"] = "event_date"
+            time_filter["start"] = (today - timedelta(days=30)).isoformat()
+            time_filter["end"] = today.isoformat()
+            return time_filter
         
         # Check for "上个月" (last month)
         if "上个月" in query:
             last_month = today.replace(day=1) - timedelta(days=1)
-            time_range["start"] = last_month.replace(day=1).isoformat()
-            time_range["end"] = last_month.isoformat()
-            return time_range
+            time_filter["mode"] = "event_date"
+            time_filter["start"] = last_month.replace(day=1).isoformat()
+            time_filter["end"] = last_month.isoformat()
+            return time_filter
         
         # Check for specific dates
         date_match = re.search(r'(\d{4})-(\d{2})-(\d{2})', query)
         if date_match:
             date_str = date_match.group(0)
-            time_range["start"] = date_str
-            time_range["end"] = date_str
-            return time_range
+            time_filter["mode"] = "event_date"
+            time_filter["start"] = date_str
+            time_filter["end"] = date_str
+            return time_filter
         
-        return time_range
+        return time_filter
     
     def _extract_constraint_types_rules(self, query: str) -> List[str]:
         """Extract constraint types using keyword matching."""
@@ -279,8 +371,9 @@ If no constraint types, use empty list [].
         """Return empty query structure."""
         return {
             "entities": [],
-            "time_range": {"start": None, "end": None},
+            "time_filter": {"mode": None, "start": None, "end": None},
             "constraint_types": [],
+            "fact_types": [],
             "intent": "fact",
             "limit": 20
         }

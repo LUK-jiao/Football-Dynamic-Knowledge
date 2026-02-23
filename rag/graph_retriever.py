@@ -30,12 +30,31 @@ class GraphRetriever:
         
         Args:
             parsed_query: Structured query from QueryAnalyzer
+                - entities: List of {name, entity_type} objects
+                - time_filter: {mode, start, end}
+                - constraint_types: List of constraint type strings
+                - intent: "fact" | "summary" | "analysis"
+                - limit: int
             
         Returns:
             List of event dictionaries with full context
         """
-        entities = parsed_query.get("entities", [])
-        time_range = parsed_query.get("time_range", {})
+        # Extract entity names from entity objects
+        entities_raw = parsed_query.get("entities", [])
+        entities = []
+        for entity in entities_raw:
+            if isinstance(entity, dict):
+                entities.append(entity.get("name", ""))
+            elif isinstance(entity, str):
+                entities.append(entity)
+        
+        # Extract time_filter and convert to start/end
+        time_filter = parsed_query.get("time_filter", {})
+        time_range = {
+            "start": time_filter.get("start") if time_filter else None,
+            "end": time_filter.get("end") if time_filter else None
+        }
+        
         constraint_types = parsed_query.get("constraint_types", [])
         intent = parsed_query.get("intent", "fact")
         limit = parsed_query.get("limit", 20)
