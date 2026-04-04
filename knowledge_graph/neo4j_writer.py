@@ -4,32 +4,13 @@ Neo4j Graph Persistence Layer for Football Knowledge Graph
 
 from typing import Dict, Any, List, Optional
 from datetime import datetime, date
-from neo4j import GraphDatabase, Driver, Session, Result
 from neo4j.exceptions import Neo4jError
-import os
+
+from knowledge_graph.neo4j_reader import Neo4jReader
 
 
-class Neo4jWriter:
+class Neo4jWriter(Neo4jReader):
     """Neo4j graph database writer for football events."""
-    
-    def __init__(
-        self,
-        uri: str = "bolt://localhost:7687",
-        user: str = "neo4j",
-        password: str = "password"
-    ):
-        self.driver: Driver = GraphDatabase.driver(uri, auth=(user, password))
-    
-    def close(self):
-        """Close the database connection."""
-        if self.driver:
-            self.driver.close()
-    
-    def __enter__(self):
-        return self
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
     
     def initialize_constraints(self) -> None:
         """Create all uniqueness constraints."""
@@ -55,22 +36,6 @@ class Neo4jWriter:
     def _generate_source_id(self, source_name: str) -> str:
         """Generate source_id from source name."""
         return source_name.lower().replace(" ", "_")
-    
-    def _parse_date(self, date_str: Optional[str]) -> Optional[date]:
-        """Parse date string to date object."""
-        if not date_str:
-            return None
-        try:
-            if len(date_str) == 4:  # YYYY
-                return date(int(date_str), 1, 1)
-            elif len(date_str) == 7:  # YYYY-MM
-                parts = date_str.split('-')
-                return date(int(parts[0]), int(parts[1]), 1)
-            else:  # YYYY-MM-DD
-                parts = date_str.split('-')
-                return date(int(parts[0]), int(parts[1]), int(parts[2]))
-        except (ValueError, IndexError):
-            return None
     
     def upsert_event(self, event_payload: Dict[str, Any]) -> None:
         """
@@ -308,102 +273,133 @@ class Neo4jWriter:
                     event_id=event_data['event_id']
                 )
     
-    def get_event_full_view(self, event_id: str) -> Optional[Dict[str, Any]]:
-        """Get complete event with all relationships."""
+    def upsert_validated_event(self, validated_event: Dict[str, Any]) -> None:
+        """
+        Persist validated event and apply confidence propagation results.
+
+        This method performs the persistence-layer stage of truth validation:
+        1) upsert new Event node with confidence fields
+        2) update old events confidence when propagation changes exist
+        3) create SUPPORTS / CONFLICTS relationships
+        4) record confidence version metadata
+
+        Args:
+            validated_event: Event payload with `validation` section
+        """
         with self.driver.session() as session:
-            result = session.run("""
+            session.execute_write(self._upsert_validated_event_tx, validated_event)
+
+    def _upsert_validated_event_tx(self, tx, validated_event: Dict[str, Any]) -> None:
+        """Transaction function for validated event persistence."""
+        validation = validated_event.get("validation", {})
+
+        # 1) Upsert event itself via existing logic-compatible shape.
+        event_payload = dict(validated_event)
+        event_payload["confidence_score"] = validation.get(
+            "current_confidence",
+            validated_event.get("confidence_score")
+        )
+        self._upsert_event_tx(tx, event_payload)
+
+        event_id = validated_event.get("event_id")
+        if not event_id:
+            return
+
+        version = int(validation.get("version", 1))
+        initial_conf = validation.get("initial_confidence")
+        current_conf = validation.get("current_confidence")
+        status = validation.get("status")
+
+        tx.run(
+            """
+            MATCH (e:Event {event_id: $event_id})
+            SET e.initial_confidence = $initial_confidence,
+                e.current_confidence = $current_confidence,
+                e.confidence_score = $current_confidence,
+                e.confidence_version = $version,
+                e.validation_status = $status,
+                e.validated_at = datetime()
+            """,
+            event_id=event_id,
+            initial_confidence=initial_conf,
+            current_confidence=current_conf,
+            version=version,
+            status=status,
+        )
+
+        # 2) Update existing events confidence according to propagation outputs.
+        propagation = validation.get("propagation", {})
+        updated_existing = propagation.get("updated_existing_events", [])
+        for item in updated_existing:
+            old_id = item.get("event_id")
+            new_confidence = item.get("new_confidence")
+            if not old_id or new_confidence is None:
+                continue
+            tx.run(
+                """
                 MATCH (e:Event {event_id: $event_id})
-                OPTIONAL MATCH (e)-[:INVOLVES]->(entity:Entity)
-                OPTIONAL MATCH (e)-[:REPORTED_BY]->(source:Source)
-                OPTIONAL MATCH (e)-[:CONSTRAINS]->(constraint:ConstraintAnchor)
-                OPTIONAL MATCH (e)-[:HAS_TITLE_ANCHOR]->(title:TitleAnchor)
-                RETURN e,
-                       collect(DISTINCT entity) AS entities,
-                       collect(DISTINCT source) AS sources,
-                       collect(DISTINCT constraint) AS constraints,
-                       collect(DISTINCT title) AS titles
-            """, event_id=event_id)
-            
-            record = result.single()
-            if not record:
-                return None
-            
-            event = dict(record['e'])
-            return {
-                'event': event,
-                'entities': [dict(e) for e in record['entities'] if e],
-                'sources': [dict(s) for s in record['sources'] if s],
-                'constraints': [dict(c) for c in record['constraints'] if c],
-                'titles': [dict(t) for t in record['titles'] if t]
-            }
-    
-    def get_entity_events(self, entity_id: str) -> List[Dict[str, Any]]:
-        """Get all events involving a specific entity."""
-        with self.driver.session() as session:
-            result = session.run("""
-                MATCH (e:Event)-[:INVOLVES]->(entity:Entity {entity_id: $entity_id})
-                RETURN e
-                ORDER BY e.created_at DESC
-            """, entity_id=entity_id)
-            
-            return [dict(record['e']) for record in result]
-    
-    def get_events_by_anchor(self, anchor_type: str) -> List[Dict[str, Any]]:
-        """Get all events with a specific constraint anchor."""
-        with self.driver.session() as session:
-            result = session.run("""
-                MATCH (e:Event)-[:CONSTRAINS]->(c:ConstraintAnchor {type: $anchor_type})
-                RETURN e
-                ORDER BY e.created_at DESC
-            """, anchor_type=anchor_type)
-            
-            return [dict(record['e']) for record in result]
-    
-    def get_events_by_title_anchor(self, title: str) -> List[Dict[str, Any]]:
-        """Get all events with a specific title anchor."""
-        with self.driver.session() as session:
-            result = session.run("""
-                MATCH (e:Event)-[:HAS_TITLE_ANCHOR]->(t:TitleAnchor {title: $title})
-                RETURN e
-                ORDER BY e.created_at DESC
-            """, title=title)
-            
-            return [dict(record['e']) for record in result]
-    
-    def get_events_by_time_range(
-        self, 
-        start_date: Optional[date] = None, 
-        end_date: Optional[date] = None
-    ) -> List[Dict[str, Any]]:
-        """Get events within a time range."""
-        with self.driver.session() as session:
-            if start_date and end_date:
-                result = session.run("""
-                    MATCH (e:Event)
-                    WHERE e.event_date >= $start_date AND e.event_date <= $end_date
-                    RETURN e
-                    ORDER BY e.event_date DESC
-                """, start_date=start_date, end_date=end_date)
-            elif start_date:
-                result = session.run("""
-                    MATCH (e:Event)
-                    WHERE e.event_date >= $start_date
-                    RETURN e
-                    ORDER BY e.event_date DESC
-                """, start_date=start_date)
-            elif end_date:
-                result = session.run("""
-                    MATCH (e:Event)
-                    WHERE e.event_date <= $end_date
-                    RETURN e
-                    ORDER BY e.event_date DESC
-                """, end_date=end_date)
-            else:
-                result = session.run("""
-                    MATCH (e:Event)
-                    WHERE e.event_date IS NOT NULL
-                    RETURN e
-                    ORDER BY e.event_date DESC
-                """)
-            
-            return [dict(record['e']) for record in result]
+                SET e.current_confidence = $current_confidence,
+                    e.confidence_score = $current_confidence,
+                    e.confidence_version = $version,
+                    e.validated_at = datetime()
+                """,
+                event_id=old_id,
+                current_confidence=new_confidence,
+                version=version,
+            )
+
+        # 3) Create SUPPORTS / CONFLICTS relations.
+        relation_analysis = validation.get("relation_analysis", {})
+        supports = relation_analysis.get("supports", [])
+        conflicts = relation_analysis.get("conflicts", [])
+
+        for item in supports:
+            target_id = item.get("event_id")
+            if not target_id:
+                continue
+            tx.run(
+                """
+                MATCH (n:Event {event_id: $new_event_id})
+                MATCH (o:Event {event_id: $old_event_id})
+                MERGE (n)-[r:SUPPORTS]->(o)
+                SET r.score = $score,
+                    r.participant_overlap = $participant_overlap,
+                    r.action_similarity = $action_similarity,
+                    r.time_overlap = $time_overlap,
+                    r.version = $version,
+                    r.updated_at = datetime()
+                """,
+                new_event_id=event_id,
+                old_event_id=target_id,
+                score=item.get("score"),
+                participant_overlap=item.get("participant_overlap"),
+                action_similarity=item.get("action_similarity"),
+                time_overlap=item.get("time_overlap"),
+                version=version,
+            )
+
+        for item in conflicts:
+            target_id = item.get("event_id")
+            if not target_id:
+                continue
+            signals = item.get("signals", {})
+            tx.run(
+                """
+                MATCH (n:Event {event_id: $new_event_id})
+                MATCH (o:Event {event_id: $old_event_id})
+                MERGE (n)-[r:CONFLICTS]->(o)
+                SET r.score = $score,
+                    r.negation_signal = $negation_signal,
+                    r.numeric_signal = $numeric_signal,
+                    r.uniqueness_signal = $uniqueness_signal,
+                    r.version = $version,
+                    r.updated_at = datetime()
+                """,
+                new_event_id=event_id,
+                old_event_id=target_id,
+                score=item.get("score"),
+                negation_signal=signals.get("negation"),
+                numeric_signal=signals.get("numeric"),
+                uniqueness_signal=signals.get("uniqueness"),
+                version=version,
+            )

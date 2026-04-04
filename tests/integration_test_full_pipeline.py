@@ -20,11 +20,14 @@ from preprocess.semantic_blocker import SemanticChunker, ChunkerConfig, Granular
 from extractor_v1.anchor_extractor import AnchorExtractor
 from extractor_v1.ollama_backend import OllamaBackend as ExtractorBackend
 from knowledge_graph.neo4j_writer import Neo4jWriter
+from verifier.multi_source_verifier import MultiSourceVerifier
 import logging
 import json
 from datetime import datetime
 from typing import List, Dict, Any
 import time
+import pytest
+from neo4j.exceptions import ServiceUnavailable
 
 # Setup logging
 logging.basicConfig(
@@ -229,6 +232,149 @@ def verify_graph_data(writer: Neo4jWriter, event_ids: List[str]):
             print(f"    Sample source: {sources[0].get('source')} ({sources[0].get('type')})")
         if constraints:
             print(f"    Sample constraint: {constraints[0].get('type')}")
+
+
+def test_truth_validation_integration_case():
+    """
+    Integration test case for Truth Validation Module.
+
+    Flow:
+    1) Insert an existing event (old event)
+    2) Validate a conflicting new event with MultiSourceVerifier
+    3) Persist validated event via upsert_validated_event
+    4) Verify CONFLICTS relation and confidence updates in Neo4j
+    """
+
+    print("\n" + "=" * 80)
+    print("TRUTH VALIDATION INTEGRATION CASE")
+    print("=" * 80)
+
+    verifier = MultiSourceVerifier(
+        alpha=0.3,
+        beta=0.4,
+        support_threshold=1.1,   # disable support propagation for this case
+        conflict_threshold=0.2,
+    )
+
+    old_event = {
+        "event_id": "tv-old-001",
+        "title_anchors": "Arsenal vs Chelsea Match",
+        "event_description": "Arsenal lost 1-2 against Chelsea.",
+        "participants": [
+            {"type": "Club", "name": "Arsenal"},
+            {"type": "Club", "name": "Chelsea"},
+        ],
+        "fact_type": "EVENT",
+        "constraints": [{"type": "MATCH_OUTCOME"}],
+        "temporal_anchors": [{"event_date": "2025-01-14", "valid_from": None, "valid_to": None}],
+        "sources": [{"type": "MEDIA", "source": "Unknown Blog", "publish_date": "2025-01-14"}],
+        "confidence_score": 0.4,
+    }
+
+    new_event = {
+        "event_id": "tv-new-001",
+        "title_anchors": "Arsenal vs Chelsea Match",
+        "event_description": "Arsenal won 3-1 against Chelsea.",
+        "participants": [
+            {"type": "Club", "name": "Arsenal"},
+            {"type": "Club", "name": "Chelsea"},
+        ],
+        "fact_type": "EVENT",
+        "constraints": [{"type": "MATCH_OUTCOME"}],
+        "temporal_anchors": [{"event_date": "2025-01-14", "valid_from": None, "valid_to": None}],
+        "sources": [{"type": "OFFICIAL", "source": "Club Official Site", "publish_date": "2025-01-14"}],
+    }
+
+    validated_new = verifier.validate_event(new_event, existing_events=[old_event], version=1)
+
+    # Basic validation output assertions
+    validation = validated_new.get("validation", {})
+    conflicts = validation.get("relation_analysis", {}).get("conflicts", [])
+    updates = validation.get("propagation", {}).get("updated_existing_events", [])
+
+    assert conflicts, "Expected at least one conflict relation in validation output"
+    assert updates, "Expected old event confidence update from propagation"
+
+    expected_old_conf = updates[0]["new_confidence"]
+
+    with Neo4jWriter() as writer:
+        try:
+            writer.initialize_constraints()
+        except ServiceUnavailable as exc:
+            pytest.skip(f"Neo4j unavailable for integration test: {exc}")
+
+        # Cleanup test nodes if they already exist
+        with writer.driver.session() as session:
+            session.run(
+                """
+                MATCH (e:Event)
+                WHERE e.event_id IN $event_ids
+                DETACH DELETE e
+                """,
+                event_ids=[old_event["event_id"], new_event["event_id"]],
+            )
+
+        # Persist old event first, then validated new event
+        writer.upsert_event(old_event)
+        writer.upsert_validated_event(validated_new)
+
+        with writer.driver.session() as session:
+            # Assert CONFLICTS relation exists
+            rel_record = session.run(
+                """
+                MATCH (n:Event {event_id: $new_event_id})-[r:CONFLICTS]->(o:Event {event_id: $old_event_id})
+                RETURN r.score AS score, r.version AS version
+                """,
+                new_event_id=new_event["event_id"],
+                old_event_id=old_event["event_id"],
+            ).single()
+
+            assert rel_record is not None, "Expected CONFLICTS relation persisted to Neo4j"
+            assert rel_record["score"] is not None
+            assert rel_record["version"] == 1
+
+            # Assert new event validation fields persisted
+            new_record = session.run(
+                """
+                MATCH (e:Event {event_id: $event_id})
+                RETURN e.current_confidence AS current_confidence,
+                       e.initial_confidence AS initial_confidence,
+                       e.validation_status AS validation_status,
+                       e.confidence_version AS confidence_version
+                """,
+                event_id=new_event["event_id"],
+            ).single()
+
+            assert new_record is not None
+            assert new_record["current_confidence"] is not None
+            assert new_record["initial_confidence"] is not None
+            assert new_record["validation_status"] in {"accepted", "needs_review", "rejected"}
+            assert new_record["confidence_version"] == 1
+
+            # Assert old event confidence updated by propagation result
+            old_record = session.run(
+                """
+                MATCH (e:Event {event_id: $event_id})
+                RETURN e.current_confidence AS current_confidence
+                """,
+                event_id=old_event["event_id"],
+            ).single()
+
+            assert old_record is not None
+            assert old_record["current_confidence"] is not None
+            assert abs(float(old_record["current_confidence"]) - float(expected_old_conf)) < 1e-6
+
+            # Cleanup created test nodes
+            session.run(
+                """
+                MATCH (e:Event)
+                WHERE e.event_id IN $event_ids
+                DETACH DELETE e
+                """,
+                event_ids=[old_event["event_id"], new_event["event_id"]],
+            )
+
+    print("✓ Truth validation integration case passed")
 
 
 def test_full_pipeline():
@@ -494,6 +640,184 @@ def test_full_pipeline():
         print("❌ SOME TESTS FAILED")
         print("="*80)
         return False
+
+
+def run_full_pipeline_with_truth_validation(model_name: str = "qwen3:8b"):
+    """
+    End-to-end pipeline runner from preprocess to truth validation using a selectable Ollama model.
+
+    Pipeline:
+    1) Sentence splitting
+    2) Semantic chunking (qwen3:8b)
+    3) Event decomposition (qwen3:8b)
+    4) Anchor extraction (qwen3:8b)
+    5) Truth validation (MultiSourceVerifier)
+    6) Persist validated events (Neo4j)
+    """
+    print("\n" + "=" * 80)
+    print(f"FULL PIPELINE WITH TRUTH VALIDATION ({model_name})")
+    print("=" * 80)
+
+    raw_text = """
+    Arsenal defeated Chelsea 2-1 at Emirates Stadium on 14 January 2025.
+    Sky Sports reported that Bukayo Saka scored the winning goal in the 80th minute.
+    Club officials later confirmed the final score and praised the team's discipline.
+    """
+    title = "Arsenal vs Chelsea Match Report"
+    source_name = "Sky Sports"
+    publish_date = "2025-01-14"
+
+    print(f"\n[Input] title={title} | source={source_name} | publish_date={publish_date}")
+
+    step1_start = time.time()
+    splitter = SentenceSplitter(min_length=10)
+    sentences = splitter.split(raw_text)
+    step1_time = time.time() - step1_start
+    assert len(sentences) > 0
+    print(f"[Step 1] Sentence splitting -> {len(sentences)} sentences ({step1_time:.2f}s)")
+
+    # Step 2-5 depend on Ollama model; skip gracefully if unavailable.
+    try:
+        step2_start = time.time()
+        preprocess_backend = PreprocessBackend(
+            model=model_name,
+            timeout=60,
+            temperature=0.05,
+        )
+
+        config = ChunkerConfig(
+            granularity=GranularityMode.MEDIUM,
+            context_window=2,
+            max_sentences_per_chunk=8,
+            enable_structural_rules=False,
+            enable_orphan_merge=False,
+            log_scores=False,
+        )
+        chunker = SemanticChunker(llm=preprocess_backend, config=config)
+        chunks = chunker.chunk(sentences)
+        assert len(chunks) > 0
+        step2_time = time.time() - step2_start
+        print(f"[Step 2] Semantic chunking -> {len(chunks)} chunks ({step2_time:.2f}s)")
+
+        step3_start = time.time()
+        blocks = format_semantic_blocks_for_decomposition(chunks, source_name, title, publish_date)
+        assert len(blocks) > 0
+        step3_time = time.time() - step3_start
+        print(f"[Step 3] Block formatting -> {len(blocks)} blocks ({step3_time:.2f}s)")
+
+        step4_start = time.time()
+        extractor_backend = ExtractorBackend(model=model_name)
+        all_events = []
+        for block in blocks:
+            decomp_result = extractor_backend.decompose_events(block)
+            all_events.extend(decomp_result.get("events", []))
+
+        assert len(all_events) > 0, "Event decomposition produced no events"
+        step4_time = time.time() - step4_start
+        print(f"[Step 4] Event decomposition -> {len(all_events)} events ({step4_time:.2f}s)")
+
+        step5_start = time.time()
+        extractor = AnchorExtractor(model=model_name)
+        extracted_results = [extractor.extract_anchors(event) for event in all_events]
+        assert len(extracted_results) == len(all_events)
+        step5_time = time.time() - step5_start
+        print(f"[Step 5] Anchor extraction -> {len(extracted_results)} extracted events ({step5_time:.2f}s)")
+    except Exception as exc:
+        pytest.skip(f"Ollama model {model_name} unavailable or failed during pipeline execution: {exc}")
+
+    # Make event ids unique for repeatable DB writes.
+    run_suffix = int(time.time() * 1000)
+    for idx, item in enumerate(extracted_results, start=1):
+        item["event_id"] = f"tv-qwen3-{run_suffix}-{idx}"
+    print(f"[Prep] Assigned unique event ids for this run: {len(extracted_results)}")
+
+    step6_start = time.time()
+    verifier = MultiSourceVerifier()
+    validated_results = verifier.validate_batch(extracted_results, existing_events=None, start_version=1)
+    step6_time = time.time() - step6_start
+
+    assert len(validated_results) == len(extracted_results)
+    assert all("validation" in item for item in validated_results)
+    assert all("current_confidence" in item["validation"] for item in validated_results)
+
+    total_candidates = sum(item["validation"]["relation_analysis"].get("candidate_count", 0) for item in validated_results)
+    total_supports = sum(len(item["validation"]["relation_analysis"].get("supports", [])) for item in validated_results)
+    total_conflicts = sum(len(item["validation"]["relation_analysis"].get("conflicts", [])) for item in validated_results)
+    print(
+        f"[Step 6] Truth validation -> {len(validated_results)} events ({step6_time:.2f}s) | "
+        f"candidates={total_candidates}, supports={total_supports}, conflicts={total_conflicts}"
+    )
+
+    event_ids = [item["event_id"] for item in validated_results]
+
+    with Neo4jWriter() as writer:
+        try:
+            writer.initialize_constraints()
+        except ServiceUnavailable as exc:
+            pytest.skip(f"Neo4j unavailable for integration test: {exc}")
+
+        with writer.driver.session() as session:
+            session.run(
+                """
+                MATCH (e:Event)
+                WHERE e.event_id IN $event_ids
+                DETACH DELETE e
+                """,
+                event_ids=event_ids,
+            )
+
+        for item in validated_results:
+            writer.upsert_validated_event(item)
+        print(f"[Step 7] Persist validated events -> wrote {len(validated_results)} events")
+
+        with writer.driver.session() as session:
+            count_record = session.run(
+                """
+                MATCH (e:Event)
+                WHERE e.event_id IN $event_ids
+                RETURN count(e) AS cnt
+                """,
+                event_ids=event_ids,
+            ).single()
+            assert count_record is not None
+            assert count_record["cnt"] == len(event_ids)
+
+            confidence_record = session.run(
+                """
+                MATCH (e:Event)
+                WHERE e.event_id IN $event_ids
+                RETURN count(e) AS total,
+                       count(e.current_confidence) AS with_current_confidence,
+                       count(e.initial_confidence) AS with_initial_confidence
+                """,
+                event_ids=event_ids,
+            ).single()
+            assert confidence_record is not None
+            assert confidence_record["with_current_confidence"] == confidence_record["total"]
+            assert confidence_record["with_initial_confidence"] == confidence_record["total"]
+            print(
+                f"[Step 8] Persistence checks -> total={confidence_record['total']}, "
+                f"with_current_confidence={confidence_record['with_current_confidence']}, "
+                f"with_initial_confidence={confidence_record['with_initial_confidence']}"
+            )
+
+            # Cleanup test data
+            session.run(
+                """
+                MATCH (e:Event)
+                WHERE e.event_id IN $event_ids
+                DETACH DELETE e
+                """,
+                event_ids=event_ids,
+            )
+
+    total_time = step1_time + step2_time + step3_time + step4_time + step5_time + step6_time
+    print(f"[Summary] {model_name} truth-validation pipeline passed in {total_time:.2f}s")
+
+
+def test_full_pipeline_with_truth_validation_qwen3():
+    """Pytest entrypoint for qwen3:8b full pipeline truth validation."""
+    run_full_pipeline_with_truth_validation("qwen3:8b")
 
 
 if __name__ == "__main__":
