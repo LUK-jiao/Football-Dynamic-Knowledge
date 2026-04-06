@@ -14,11 +14,18 @@ Key Principles:
 - Deterministic and explainable
 """
 
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 from dataclasses import dataclass
 from enum import Enum
 import logging
 import re
+
+from preprocess.contracts import (
+    PreChunkInput,
+    SemanticChunkDocument,
+    build_semantic_chunk_documents,
+    from_datasource_document,
+)
 
 
 # ============================================================================
@@ -67,7 +74,7 @@ class ChunkerConfig:
         if not 0.0 <= self.break_threshold <= 1.0:
             raise ValueError(f"break_threshold must be in [0.0, 1.0], got {self.break_threshold}")
         if self.max_sentences_per_chunk < 1:
-            raise ValueError(f"max_sentences_per_chunk must be >= 1")
+            raise ValueError("max_sentences_per_chunk must be >= 1")
         if not 1 <= self.context_window <= 5:
             logging.warning(f"context_window={self.context_window} outside recommended range [1,5]")
 
@@ -85,7 +92,6 @@ class ScoringResult:
 
 
 @dataclass
-@dataclass
 class Chunk:
     """A semantic chunk with metadata."""
     sentences: List[str]
@@ -100,22 +106,33 @@ class Chunk:
     def __len__(self):
         return len(self.sentences)
     
-    def to_extractor_input(self, source: str = "", publish_date: str = "") -> dict:
+    def to_extractor_input(
+        self,
+        source_name: str = "",
+        source_type: str = "",
+        publish_date: str = "",
+        author: str = "",
+    ) -> dict:
         """
         转换为 extractor 模块所需的输入格式
         
         Args:
-            source: 文档来源（如 "BBC", "Official"）
+            source_name: 文档来源名称（如 "BBC Sport"）
+            source_type: 文档来源类型（如 "MEDIA", "OFFICIAL"）
             publish_date: 发布日期（YYYY-MM-DD）
+            author: 作者（可选）
             
         Returns:
-            标准化的 extractor 输入字典，包含 block_id, text, source, publish_date
+            标准化的 extractor 输入字典（包含 block_text/source_name/source_type）
         """
         return {
             "block_id": f"block_{self.chunk_id:03d}",
-            "text": " ".join(self.sentences),  # 合并句子为单个文本块
-            "source": source,
-            "publish_date": publish_date
+            "text": " ".join(self.sentences),  # backward compatible
+            "block_text": " ".join(self.sentences),
+            "source_name": source_name,
+            "source_type": source_type,
+            "publish_date": publish_date,
+            "author": author,
         }
 
 
@@ -270,6 +287,23 @@ class SemanticChunker:
         final_chunks = self._finalize_chunks(raw_chunks)
         
         return final_chunks
+
+    def chunk_document(self, article_document: Dict[str, Any], prechunk_inputs: List[PreChunkInput]) -> List[SemanticChunkDocument]:
+        """Chunk a canonical article document + sentence units into SemanticChunkDocument outputs."""
+        doc = from_datasource_document(article_document)
+        ordered_sentences = [unit.sentence_text for unit in sorted(prechunk_inputs, key=lambda x: x.sentence_order)]
+        chunks = self.chunk(ordered_sentences)
+        chunk_texts = [" ".join(c.sentences) for c in chunks if c.sentences]
+        return build_semantic_chunk_documents(
+            doc_id=doc["doc_id"] or "doc",
+            title=doc["title"],
+            source_name=doc["source_name"],
+            source_type=doc["source_type"],
+            publish_date=doc["publish_date"],
+            author=doc["author"],
+            chunk_texts=chunk_texts,
+            metadata=doc["metadata"],
+        )
     
     def _initial_chunking(self, sentences: List[str]) -> List[List[str]]:
         """

@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from preprocess.sentence_splitter import SentenceSplitter
 from preprocess.semantic_blocker import SemanticChunker, ChunkerConfig, GranularityMode, OllamaBackend as PreprocessBackend
+from datasource.service import DataSourceService
 from extractor_v1.anchor_extractor import AnchorExtractor
 from extractor_v1.ollama_backend import OllamaBackend as ExtractorBackend
 from knowledge_graph.neo4j_writer import Neo4jWriter
@@ -818,6 +819,235 @@ def run_full_pipeline_with_truth_validation(model_name: str = "qwen3:8b"):
 def test_full_pipeline_with_truth_validation_qwen3():
     """Pytest entrypoint for qwen3:8b full pipeline truth validation."""
     run_full_pipeline_with_truth_validation("qwen3:8b")
+
+
+def test_full_pipeline_single_fetch_from_postgresql():
+    """
+    Contract-focused E2E test with ONE datasource fetch only.
+
+    Rules:
+    - Test data is fetched exactly once from PostgreSQL through DataSourceService.
+    - No manual data supplementation/injection after fetch.
+    - Pipeline must pass through datasource -> preprocess -> extractor_v1 -> verifier -> knowledge_graph.
+    """
+    model_name = "llama3:latest"
+
+    def _preview(text: str, limit: int = 140) -> str:
+        if not text:
+            return ""
+        cleaned = " ".join(str(text).split())
+        return cleaned if len(cleaned) <= limit else cleaned[:limit] + "..."
+
+    print("\n" + "=" * 80)
+    print(f"SINGLE-FETCH FULL PIPELINE ({model_name})")
+    print("=" * 80)
+
+    # --------------------------------------------------------------------
+    # Step 0: Fetch once from datasource (PostgreSQL)
+    # --------------------------------------------------------------------
+    target_news_id = 10
+    service = DataSourceService()
+    try:
+        docs = service.fetch_documents_by_ids([target_news_id])
+    except Exception as exc:
+        pytest.skip(f"Datasource(PostgreSQL) unavailable for integration test: {exc}")
+
+    if not docs:
+        pytest.skip(f"Datasource returned no document for id={target_news_id}")
+
+    article = docs[0]
+    assert article.get("doc_id")
+    assert article.get("raw_text")
+    assert article.get("source_name")
+    assert article.get("source_type")
+    assert article.get("publish_date")
+    assert article["doc_id"] == f"news-{target_news_id}"
+    print(
+        f"[Step 0] fetched document by id={target_news_id}: "
+        f"doc_id={article['doc_id']}, source={article['source_name']}"
+    )
+    print(
+        "[Step 0 Detail] "
+        f"title={article.get('title', '')} | publish_date={article.get('publish_date', '')} | "
+        f"author={article.get('author', '') or 'N/A'}"
+    )
+    print(f"[Step 0 Detail] raw_text preview: {_preview(article.get('raw_text', ''), 220)}")
+
+    # --------------------------------------------------------------------
+    # Step 1: Preprocess (sentence splitting) using canonical article doc
+    # --------------------------------------------------------------------
+    splitter = SentenceSplitter(min_length=10)
+    prechunk_inputs = splitter.split_document(article)
+    assert len(prechunk_inputs) > 0
+    print(f"[Step 1] split_document -> {len(prechunk_inputs)} PreChunkInput units")
+    for i, unit in enumerate(prechunk_inputs, start=1):
+        print(
+            f"  [S{i:02d}] id={unit.sentence_id} order={unit.sentence_order} "
+            f"text={_preview(unit.sentence_text, 180)}"
+        )
+
+    # --------------------------------------------------------------------
+    # Step 2: Preprocess (semantic chunking) to SemanticChunkDocument
+    # --------------------------------------------------------------------
+    try:
+        preprocess_backend = PreprocessBackend(model=model_name, timeout=60, temperature=0.05)
+        chunker = SemanticChunker(
+            llm=preprocess_backend,
+            config=ChunkerConfig(
+                granularity=GranularityMode.MEDIUM,
+                context_window=2,
+                max_sentences_per_chunk=8,
+                enable_structural_rules=False,
+                enable_orphan_merge=False,
+                log_scores=False,
+            ),
+        )
+        semantic_docs = chunker.chunk_document(article, prechunk_inputs)
+    except Exception as exc:
+        pytest.skip(f"Preprocess/Ollama unavailable for integration test: {exc}")
+
+    assert len(semantic_docs) > 0
+    assert all(sd.doc_id == article["doc_id"] for sd in semantic_docs)
+    print(f"[Step 2] chunk_document -> {len(semantic_docs)} SemanticChunkDocument blocks")
+    for i, sd in enumerate(semantic_docs, start=1):
+        print(
+            f"  [B{i:02d}] block_id={sd.block_id} source={sd.source_name}/{sd.source_type} "
+            f"publish_date={sd.publish_date}"
+        )
+        print(f"        text={_preview(sd.block_text, 220)}")
+
+    # --------------------------------------------------------------------
+    # Step 3: Event decomposition (extractor_v1)
+    # --------------------------------------------------------------------
+    try:
+        extractor_backend = ExtractorBackend(model=model_name)
+        events = []
+        for i, sd in enumerate(semantic_docs, start=1):
+            block = sd.to_event_decomposition_input()
+            decomp = extractor_backend.decompose_events(block)
+            block_events = decomp.get("events", [])
+            events.extend(block_events)
+            print(
+                f"  [Step 3 Detail] block {i}/{len(semantic_docs)} -> "
+                f"{len(block_events)} events from {sd.block_id}"
+            )
+    except Exception as exc:
+        pytest.skip(f"Extractor decomposition/Ollama unavailable for integration test: {exc}")
+
+    assert len(events) > 0
+    assert all(e.get("event_id") for e in events)
+    assert all(e.get("source_name") for e in events)
+    assert all(e.get("source_type") for e in events)
+    print(f"[Step 3] decompose_events -> {len(events)} EventUnit records")
+    for i, event in enumerate(events, start=1):
+        print(
+            f"  [E{i:02d}] event_id={event.get('event_id')} chunk_id={event.get('chunk_id') or event.get('block_id')}"
+        )
+        print(f"        description={_preview(event.get('event_description', ''), 220)}")
+
+    # --------------------------------------------------------------------
+    # Step 4: Anchor extraction (extractor_v1)
+    # --------------------------------------------------------------------
+    try:
+        anchor_extractor = AnchorExtractor(model=model_name)
+        anchored_events = [anchor_extractor.extract_anchors(event) for event in events]
+    except Exception as exc:
+        pytest.skip(f"Anchor extraction/Ollama unavailable for integration test: {exc}")
+
+    assert len(anchored_events) == len(events)
+    assert all("sources" in item for item in anchored_events)
+    assert all("participants" in item for item in anchored_events)
+    print(f"[Step 4] extract_anchors -> {len(anchored_events)} AnchoredEvent records")
+    for i, item in enumerate(anchored_events, start=1):
+        participants = item.get("participants", [])
+        sources = item.get("sources", [])
+        constraints = item.get("constraints", [])
+        print(
+            f"  [A{i:02d}] event_id={item.get('event_id')} fact_type={item.get('fact_type')} "
+            f"participants={len(participants)} sources={len(sources)} constraints={len(constraints)}"
+        )
+        if participants:
+            first_p = participants[0]
+            print(
+                f"        sample_participant={first_p.get('name', 'N/A')}({first_p.get('type', 'N/A')})"
+            )
+        if sources:
+            first_s = sources[0]
+            source_label = first_s.get("name") or first_s.get("source") or "N/A"
+            print(f"        sample_source={source_label}({first_s.get('type', 'UNKNOWN')})")
+
+    # --------------------------------------------------------------------
+    # Step 5: Truth validation (verifier)
+    # --------------------------------------------------------------------
+    verifier = MultiSourceVerifier()
+    validated_events = verifier.validate_batch(anchored_events, existing_events=None, start_version=1)
+    assert len(validated_events) == len(anchored_events)
+    assert all("validation" in item for item in validated_events)
+    print(f"[Step 5] validate_batch -> {len(validated_events)} validated events")
+    for i, item in enumerate(validated_events, start=1):
+        validation = item.get("validation", {})
+        relation = validation.get("relation_analysis", {})
+        print(
+            f"  [V{i:02d}] event_id={item.get('event_id')} confidence={validation.get('current_confidence')} "
+            f"candidates={relation.get('candidate_count', 0)} "
+            f"supports={len(relation.get('supports', []))} conflicts={len(relation.get('conflicts', []))}"
+        )
+
+    # --------------------------------------------------------------------
+    # Step 6: Persist to knowledge graph (Neo4j)
+    # --------------------------------------------------------------------
+    event_ids = [item["event_id"] for item in validated_events if item.get("event_id")]
+    if not event_ids:
+        pytest.fail("No event_id produced before knowledge graph write")
+
+    with Neo4jWriter() as writer:
+        try:
+            writer.initialize_constraints()
+        except ServiceUnavailable as exc:
+            pytest.skip(f"Neo4j unavailable for integration test: {exc}")
+
+        with writer.driver.session() as session:
+            session.run(
+                """
+                MATCH (e:Event)
+                WHERE e.event_id IN $event_ids
+                DETACH DELETE e
+                """,
+                event_ids=event_ids,
+            )
+
+        for item in validated_events:
+            writer.upsert_validated_event(item)
+
+        with writer.driver.session() as session:
+            record = session.run(
+                """
+                MATCH (e:Event)
+                WHERE e.event_id IN $event_ids
+                RETURN count(e) AS cnt,
+                       count(e.current_confidence) AS with_current_confidence,
+                       count(e.initial_confidence) AS with_initial_confidence
+                """,
+                event_ids=event_ids,
+            ).single()
+
+            assert record is not None
+            assert record["cnt"] == len(event_ids)
+            assert record["with_current_confidence"] == record["cnt"]
+            assert record["with_initial_confidence"] == record["cnt"]
+
+            # Cleanup for idempotent reruns
+            session.run(
+                """
+                MATCH (e:Event)
+                WHERE e.event_id IN $event_ids
+                DETACH DELETE e
+                """,
+                event_ids=event_ids,
+            )
+
+    print("[Step 6] knowledge_graph write + verification passed")
+    print("\n✅ SINGLE-FETCH full pipeline passed")
 
 
 if __name__ == "__main__":

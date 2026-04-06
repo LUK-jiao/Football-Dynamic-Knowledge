@@ -3,9 +3,11 @@ Simple and effective sentence splitter using spaCy.
 No complex rules needed - spaCy handles everything perfectly.
 """
 
-from typing import List
+from typing import List, Dict, Any
 import warnings
 import re
+
+from preprocess.contracts import PreChunkInput, build_prechunk_inputs, from_datasource_document
 
 
 class SentenceSplitter:
@@ -139,7 +141,6 @@ class SentenceSplitter:
                 # Determine which quote type is active (double " or single ')
                 # Priority: double quotes > single quotes
                 using_double = '"' in sent
-                using_single = "'" in sent and not using_double
                 
                 # Track if we're inside an open quote
                 in_quote = True
@@ -285,3 +286,9 @@ class SentenceSplitter:
             List of sentence lists
         """
         return [self.split(text) for text in texts]
+
+    def split_document(self, article_document: Dict[str, Any]) -> List[PreChunkInput]:
+        """Split a datasource ArticleDocument and return canonical PreChunkInput units."""
+        doc = from_datasource_document(article_document)
+        sentences = self.split(doc["raw_text"])
+        return build_prechunk_inputs(sentences, doc_id=doc["doc_id"] or "doc")

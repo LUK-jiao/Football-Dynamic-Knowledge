@@ -45,7 +45,8 @@ class AnchorExtractor:
                 - title_anchors: 标题提炼
                 - event_description: 事件描述（PRIMARY NER SOURCE）
                 - block_text: 原始文本块（参考用）
-                - source: 信息来源
+                - source_name: 信息来源名称
+                - source_type: 信息来源类型
                 - publish_date: 发布日期
         
         Returns:
@@ -150,7 +151,7 @@ class AnchorExtractor:
         
         if show_progress:
             avg_time = total_time / total if total > 0 else 0
-            print(f"\n✅ 批量处理完成！")
+            print("\n✅ 批量处理完成！")
             print(f"   总耗时: {total_time:.2f}s")
             print(f"   平均耗时: {avg_time:.2f}s/event")
             print(f"   加速比: ~{len(events) * 8 / total_time:.1f}x（相比顺序处理）")
@@ -185,11 +186,21 @@ class AnchorExtractor:
         Raises:
             ValueError: 输入格式不正确
         """
-        required_fields = ["event_id", "event_description"]
+        required_fields = [
+            "event_id",
+            "title_anchors",
+            "event_description",
+            "block_text",
+            "source_type",
+            "publish_date",
+        ]
         
         for field in required_fields:
             if field not in event:
                 raise ValueError(f"输入缺少必需字段: {field}")
+
+        if "source_name" not in event and "source" not in event:
+            raise ValueError("输入缺少必需字段: source_name")
         
         if not event["event_description"] or not event["event_description"].strip():
             raise ValueError("event_description 字段不能为空")

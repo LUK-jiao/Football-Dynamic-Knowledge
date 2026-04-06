@@ -7,7 +7,7 @@ app:
   port: 8000
 
 database:
-  url: postgresql://user:password@localhost:5432/football_kb_dev
+  url: postgresql://news_user:news_password2026@8.146.227.206:5432/news_db
   pool_size: 5
   max_overflow: 10
 

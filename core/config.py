@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     
     # Database
     database_url: str = Field(
-        default="postgresql://user:password@localhost:5432/football_kb",
+        default="postgresql://news_user:news_password2026@8.146.227.206:5432/news_db",
         alias="DATABASE_URL"
     )
     neo4j_uri: str = Field(default="bolt://localhost:7687", alias="NEO4J_URI")

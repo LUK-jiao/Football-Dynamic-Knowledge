@@ -51,10 +51,12 @@ class EventDecomposer:
         
         Args:
             block: 输入的语义块，必须包含：
-                - block_id: 唯一标识
+                - chunk_id: 唯一标识（兼容 block_id）
                 - text: 原始文本
-                - source: 信息来源
+                - source_name: 信息来源名称
+                - source_type: 信息来源类型
                 - publish_date: 发布日期
+                - author: 作者（可选）
         
         Returns:
             包含事件列表的结果 dict：
@@ -62,12 +64,17 @@ class EventDecomposer:
                 "events": [
                     {
                         "event_id": "...",
+                        "doc_id": "...",
+                        "chunk_id": "...",
+                        "event_index": 1,
                         "parent_event_id": "..." | null,
                         "is_sub_event": true | false,
                         "event_description": "...",
                         "block_text": "...",
-                        "source": "...",
+                        "source_name": "...",
+                        "source_type": "...",
                         "publish_date": "...",
+                        "author": "...",
                         "inference_time": 1.234  # LLM 推理时间（秒）
                     }
                 ]
@@ -92,7 +99,26 @@ class EventDecomposer:
         # 为每个 event 添加推理时间（平均分配）
         if "events" in result and result["events"]:
             avg_time = inference_time / len(result["events"])
-            for event in result["events"]:
+            chunk_id = block.get("chunk_id") or block.get("block_id")
+            doc_id = block.get("doc_id")
+            for idx, event in enumerate(result["events"], start=1):
+                if chunk_id:
+                    event["chunk_id"] = chunk_id
+                    # 系统后处理统一覆盖 event_id，避免依赖模型自由生成。
+                    event["event_id"] = f"{chunk_id}:e{idx:03d}"
+                if doc_id:
+                    event["doc_id"] = doc_id
+                event["event_index"] = idx
+                if not event.get("block_text"):
+                    event["block_text"] = block.get("text", "")
+                if not event.get("source_name"):
+                    event["source_name"] = block.get("source_name") or block.get("source", "")
+                if not event.get("source_type"):
+                    event["source_type"] = block.get("source_type", "UNKNOWN")
+                if not event.get("publish_date"):
+                    event["publish_date"] = block.get("publish_date", "")
+                if event.get("author") is None:
+                    event["author"] = block.get("author", "")
                 event["inference_time"] = round(avg_time, 3)
         
         return result
@@ -142,7 +168,7 @@ class EventDecomposer:
     
     def _validate_input(self, block: Dict[str, Any]):
         """验证输入 block 的格式"""
-        required_fields = ["block_id", "text", "source", "publish_date"]
+        required_fields = ["text", "publish_date"]
         
         for field in required_fields:
             if field not in block:
@@ -150,6 +176,16 @@ class EventDecomposer:
                     f"Block 缺少必填字段: {field}. "
                     f"当前字段: {list(block.keys())}"
                 )
+
+        if "chunk_id" not in block and "block_id" not in block:
+            raise ValueError(
+                f"Block 缺少必填字段: chunk_id(兼容 block_id). 当前字段: {list(block.keys())}"
+            )
+
+        if "source_name" not in block and "source" not in block:
+            raise ValueError(
+                f"Block 缺少必填字段: source_name. 当前字段: {list(block.keys())}"
+            )
         
         if not isinstance(block["text"], str) or not block["text"].strip():
             raise ValueError("Block text 必须是非空字符串")

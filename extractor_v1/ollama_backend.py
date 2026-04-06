@@ -6,7 +6,7 @@ Ollama Backend for Football Event Anchor Extraction
 """
 
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 import ollama
 
 SYSTEM_PROMPT = """You are a FOOTBALL EVENT EXTRACTION AGENT.
@@ -74,8 +74,9 @@ Arrays MAY be empty.
   "sources": [
     {
       "type": string,
-      "source": string,
-      "publish_date": string
+            "name": string,
+            "publish_date": string,
+            "author": string
     }
   ]
 }
@@ -224,8 +225,10 @@ Rules:
 
 - Use ONLY one of the four values.
 - Do NOT invent new categories.
-- Copy the input source name exactly into "source".
+- Copy the input source name exactly into "name".
+- If input source_type is provided and valid, keep it as "type".
 - Copy publish_date exactly as given.
+- Copy author exactly as given. If empty, return empty string.
 - Do NOT modify publish_date format.
 
 ==================================================
@@ -250,8 +253,10 @@ DEVELOPER_PROMPT = """Input Event:
 Event ID: {event_id}
 Title Anchors: {title_anchors}
 Event Description: {event_description}
-Source: {source}
+Source Name: {source_name}
+Source Type: {source_type}
 Publish Date: {publish_date}
+Author: {author}
 
 (Block Text for reference: {block_text})
 
@@ -299,9 +304,13 @@ title
 
 text (original semantic block)
 
-source
+source_name
+
+source_type
 
 publish_date
+
+author
 
 ==================================================
 OUTPUT JSON SCHEMA (STRICT)
@@ -313,8 +322,10 @@ OUTPUT JSON SCHEMA (STRICT)
       "title_anchors": "string",
       "event_description": "string",
       "block_text": "string",
-      "source": "string",
-      "publish_date": "string"
+            "source_name": "string",
+            "source_type": "string",
+            "publish_date": "string",
+            "author": "string"
     }
   ]
 }
@@ -532,8 +543,10 @@ Nothing else.
 EVENT_DECOMPOSITION_DEVELOPER_PROMPT = """Input:
 Block ID: {block_id}
 Title: {title}
-Source: {source}
+Source Name: {source_name}
+Source Type: {source_type}
 Publish Date: {publish_date}
+Author: {author}
 Text: {text}
 
 Output JSON (array of events):
@@ -575,7 +588,7 @@ class OllamaBackend:
         构建两段式 Prompt 消息列表
         
         Args:
-            event: 输入的事件（包含 event_id, title_anchors, event_description, block_text, source, publish_date）
+            event: 输入的事件（包含 event_id, title_anchors, event_description, block_text, source_name, source_type, publish_date）
             
         Returns:
             消息列表 [{"role": "system", "content": ...}, {"role": "user", "content": ...}]
@@ -592,8 +605,10 @@ class OllamaBackend:
             title_anchors=event.get("title_anchors", "N/A"),
             event_description=event.get("event_description", ""),
             block_text=event.get("block_text", "")[:200] + "...",  # 只显示前200字符作为参考
-            source=event.get("source", "N/A"),
-            publish_date=event.get("publish_date", "N/A")
+            source_name=event.get("source_name") or event.get("source", "N/A"),
+            source_type=event.get("source_type", "UNKNOWN"),
+            publish_date=event.get("publish_date", "N/A"),
+            author=event.get("author", "")
         )
         
         developer_message = {
@@ -703,8 +718,10 @@ class OllamaBackend:
                 - title_anchors: 标题提炼（用于上下文理解）
                 - event_description: 事件描述（PRIMARY NER SOURCE）
                 - block_text: 原始文本块（参考用）
-                - source: 信息来源
+                - source_name: 信息来源名称
+                - source_type: 信息来源类型
                 - publish_date: 发布日期
+                - author: 作者（可为空）
             
         Returns:
             包含锚点的结果 dict（扁平化结构）：
@@ -733,6 +750,24 @@ class OllamaBackend:
         
         # 3. 解析 JSON
         result = self._parse_json(raw_response)
+
+        # 3.1 规范化 sources 子字段：source -> name
+        normalized_sources = []
+        for src in result.get("sources", []):
+            item = dict(src)
+            if "name" not in item and "source" in item:
+                item["name"] = item.get("source")
+            item.pop("source", None)
+            if not item.get("name"):
+                item["name"] = event.get("source_name") or event.get("source") or "UNKNOWN"
+            if not item.get("type"):
+                item["type"] = event.get("source_type", "UNKNOWN")
+            if not item.get("publish_date"):
+                item["publish_date"] = event.get("publish_date")
+            if "author" not in item or item.get("author") is None:
+                item["author"] = event.get("author", "")
+            normalized_sources.append(item)
+        result["sources"] = normalized_sources
         
         # 4. 添加事件标识信息
         result["event_id"] = event.get("event_id")
@@ -784,10 +819,12 @@ class OllamaBackend:
         
         Args:
             block: 输入的语义块，必须包含：
-                - block_id: 唯一标识
+                - chunk_id: 唯一标识（兼容 block_id）
                 - text: 原始文本
-                - source: 信息来源
+                - source_name: 信息来源名称
+                - source_type: 信息来源类型
                 - publish_date: 发布日期
+                - author: 作者（可选）
                 - title: 文章标题（可选）
         
         Returns:
@@ -796,11 +833,16 @@ class OllamaBackend:
                 "events": [
                     {
                         "event_id": "...",
+                        "doc_id": "...",
+                        "chunk_id": "...",
+                        "event_index": 1,
                         "title_anchors": "...",
                         "event_description": "...",
                         "block_text": "...",
-                        "source": "...",
-                        "publish_date": "..."
+                        "source_name": "...",
+                        "source_type": "...",
+                        "publish_date": "...",
+                        "author": "..."
                     }
                 ]
             }
@@ -809,10 +851,17 @@ class OllamaBackend:
             ValueError: 输入格式不正确或解析失败
         """
         # 验证输入
-        required_fields = ["block_id", "text", "source", "publish_date"]
+        required_fields = ["text", "publish_date"]
         for field in required_fields:
             if field not in block:
                 raise ValueError(f"Block 缺少必填字段: {field}")
+
+        chunk_id = block.get("chunk_id") or block.get("block_id")
+        if not chunk_id:
+            raise ValueError("Block 缺少必填字段: chunk_id(兼容 block_id)")
+
+        if "source_name" not in block and "source" not in block:
+            raise ValueError("Block 缺少必填字段: source_name")
         
         # 1. 构建事件分解消息
         system_message = {
@@ -821,10 +870,12 @@ class OllamaBackend:
         }
         
         developer_content = EVENT_DECOMPOSITION_DEVELOPER_PROMPT.format(
-            block_id=block.get("block_id", "N/A"),
+            block_id=chunk_id,
             title=block.get("title", "N/A"),
-            source=block.get("source", "N/A"),
+            source_name=block.get("source_name") or block.get("source", "N/A"),
+            source_type=block.get("source_type", "UNKNOWN"),
             publish_date=block.get("publish_date", "N/A"),
+            author=block.get("author", ""),
             text=block.get("text", "")
         )
         
@@ -844,11 +895,39 @@ class OllamaBackend:
         # 4. 验证输出格式
         if "events" not in result or not isinstance(result["events"], list):
             raise ValueError("Event decomposition output must contain 'events' array")
-        
-        # 5. 验证每个 event 的必填字段
-        required_event_fields = ["event_id", "title_anchors", "event_description", 
-                                 "block_text", "source", "publish_date"]
-        for event in result["events"]:
+
+        # 5. 统一后处理输出字段（新契约优先，兼容旧字段）
+        doc_id = block.get("doc_id")
+        for idx, event in enumerate(result["events"], start=1):
+            # source/source_name 兼容
+            if "source_name" not in event and "source" in event:
+                event["source_name"] = event.get("source")
+            if not event.get("source_name"):
+                event["source_name"] = block.get("source_name") or block.get("source", "")
+            if "source_type" not in event:
+                event["source_type"] = block.get("source_type", "UNKNOWN")
+            if "author" not in event or event.get("author") is None:
+                event["author"] = block.get("author", "")
+            if not event.get("publish_date"):
+                event["publish_date"] = block.get("publish_date", "")
+            if not event.get("block_text"):
+                event["block_text"] = block.get("text", "")
+
+            # EventUnit 追踪字段
+            event["chunk_id"] = chunk_id
+            if doc_id:
+                event["doc_id"] = doc_id
+            event["event_index"] = idx
+
+            # 系统后处理统一 event_id
+            event["event_id"] = f"{chunk_id}:e{idx:03d}"
+
+            event.pop("source", None)
+
+            required_event_fields = [
+                "event_id", "title_anchors", "event_description",
+                "block_text", "source_name", "source_type", "publish_date", "author", "chunk_id", "event_index"
+            ]
             for field in required_event_fields:
                 if field not in event:
                     raise ValueError(f"Event missing required field: {field}")
@@ -938,15 +1017,15 @@ def validate_schema(result: Dict[str, Any]) -> bool:
     
     for constraint in result["constraints"]:
         if "type" not in constraint:
-            print(f"❌ constraint 缺少 type 字段")
+            print("❌ constraint 缺少 type 字段")
             return False
         if constraint["type"] not in allowed_constraint_types:
             print(f"⚠️  警告: constraint type 不在允许列表中: {constraint['type']}")
     
     # 检查 sources 格式
     for source in result["sources"]:
-        if "type" not in source or "source" not in source or "publish_date" not in source:
-            print(f"❌ source 缺少必需字段 (type, source, publish_date)")
+        if "type" not in source or "name" not in source or "publish_date" not in source or "author" not in source:
+            print("❌ source 缺少必需字段 (type, name, publish_date, author)")
             return False
         
         allowed_source_types = ["OFFICIAL", "MEDIA", "USER_GENERATED", "UNKNOWN"]
@@ -993,8 +1072,10 @@ if __name__ == "__main__":
     test_block = {
         "block_id": "test_001",
         "text": "De Ligt has agreed to join Manchester United from Bayern Munich on 1 September 2025.",
-        "source": "BBC Sport",
-        "publish_date": "2025-08-23"
+        "source_name": "BBC Sport",
+        "source_type": "MEDIA",
+        "publish_date": "2025-08-23",
+        "author": "BBC Reporter"
     }
     
     print("📋 测试 Block:")

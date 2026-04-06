@@ -43,7 +43,9 @@ def load_extraction_results(json_file_path: str) -> None:
             for constraint in event.get('constraints', []):
                 total_constraints.add(constraint['type'])
             for source in event.get('sources', []):
-                total_sources.add(source['source'])
+                source_name = source.get('name') or source.get('source')
+                if source_name:
+                    total_sources.add(source_name)
         
         print(f"\nStatistics:")
         print(f"  - Events: {len(events)}")

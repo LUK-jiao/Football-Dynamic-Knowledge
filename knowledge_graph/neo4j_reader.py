@@ -6,7 +6,7 @@ Contains query-oriented methods and candidate retrieval for truth validation.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from neo4j import Driver, GraphDatabase
@@ -203,8 +203,10 @@ class Neo4jReader:
                     ],
                     "sources": [
                         {
+                            "name": s.get("name") or s.get("source"),
                             "source": s.get("name") or s.get("source"),
                             "type": s.get("type"),
+                            "author": s.get("author"),
                             "publish_date": str(s.get("publish_date")) if s.get("publish_date") else None,
                         }
                         for s in sources

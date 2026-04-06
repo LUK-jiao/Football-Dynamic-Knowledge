@@ -2,8 +2,8 @@
 Neo4j Graph Persistence Layer for Football Knowledge Graph
 """
 
-from typing import Dict, Any, List, Optional
-from datetime import datetime, date
+from typing import Dict, Any, List
+from datetime import datetime
 from neo4j.exceptions import Neo4jError
 
 from knowledge_graph.neo4j_reader import Neo4jReader
@@ -111,22 +111,28 @@ class Neo4jWriter(Neo4jReader):
         # Process sources
         sources = event_payload.get('sources', [])
         for source in sources:
-            source_id = self._generate_source_id(source['source'])
+            source_name = source.get('name') or source.get('source')
+            if not source_name:
+                continue
+            source_id = self._generate_source_id(source_name)
             publish_date = self._parse_date(source.get('publish_date'))
+            author = source.get('author', '')
             
             tx.run("""
                 MERGE (s:Source {source_id: $source_id})
                 SET s.name = $name,
                     s.type = $type,
-                    s.publish_date = $publish_date
+                    s.publish_date = $publish_date,
+                    s.author = $author
                 WITH s
                 MATCH (e:Event {event_id: $event_id})
                 MERGE (e)-[:REPORTED_BY]->(s)
             """,
                 source_id=source_id,
-                name=source['source'],
-                type=source['type'],
+                name=source_name,
+                type=source.get('type', 'UNKNOWN'),
                 publish_date=publish_date,
+                author=author,
                 event_id=event_payload['event_id']
             )
         
@@ -232,22 +238,28 @@ class Neo4jWriter(Neo4jReader):
                 )
             
             for source in event_data['sources']:
-                source_id = self._generate_source_id(source['source'])
+                source_name = source.get('name') or source.get('source')
+                if not source_name:
+                    continue
+                source_id = self._generate_source_id(source_name)
                 publish_date = self._parse_date(source.get('publish_date'))
+                author = source.get('author', '')
                 
                 tx.run("""
                     MERGE (s:Source {source_id: $source_id})
                     SET s.name = $name,
                         s.type = $type,
-                        s.publish_date = $publish_date
+                        s.publish_date = $publish_date,
+                        s.author = $author
                     WITH s
                     MATCH (e:Event {event_id: $event_id})
                     MERGE (e)-[:REPORTED_BY]->(s)
                 """,
                     source_id=source_id,
-                    name=source['source'],
-                    type=source['type'],
+                    name=source_name,
+                    type=source.get('type', 'UNKNOWN'),
                     publish_date=publish_date,
+                    author=author,
                     event_id=event_data['event_id']
                 )
             

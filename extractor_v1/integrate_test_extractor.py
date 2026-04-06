@@ -30,7 +30,14 @@ logging.basicConfig(
 )
 
 
-def format_semantic_blocks_for_decomposition(chunks: List[Any], source_name: str, title: str, publish_date: str) -> List[Dict[str, Any]]:
+def format_semantic_blocks_for_decomposition(
+    chunks: List[Any],
+    source_name: str,
+    source_type: str,
+    title: str,
+    publish_date: str,
+    author: str = "",
+) -> List[Dict[str, Any]]:
     """
     Convert semantic chunks from preprocess to blocks for event decomposition.
     
@@ -38,9 +45,11 @@ def format_semantic_blocks_for_decomposition(chunks: List[Any], source_name: str
     
     Args:
         chunks: Semantic chunks from SemanticChunker
-        source_name: Source name (e.g., "BBC Sport")
+    source_name: Source name (e.g., "BBC Sport")
+    source_type: Source type (e.g., "MEDIA")
         title: Article title
         publish_date: Publication date in YYYY-MM-DD format
+    author: Optional author name
     
     Returns:
         List of blocks ready for Event Decomposition (excluding quotes blocks)
@@ -60,9 +69,11 @@ def format_semantic_blocks_for_decomposition(chunks: List[Any], source_name: str
         block = {
             "block_id": f"block_{chunk.chunk_id}",
             "text": text,
-            "source": source_name,
+            "source_name": source_name,
+            "source_type": source_type,
             "title": title,
             "publish_date": publish_date,
+            "author": author,
             "chunk_type": chunk.chunk_type  # Keep track of chunk type
         }
         
@@ -110,7 +121,7 @@ def print_extraction_results(results: List[Dict[str, Any]]):
             print(f"\nSources ({len(sources)}):")
             for s in sources:
                 source_type = s.get('type', 'UNKNOWN')
-                source_name = s.get('source', 'N/A')
+                source_name = s.get('name') or s.get('source') or 'N/A'
                 print(f"  • {source_name} ({source_type})")
         
         # Constraints (now at top level, simplified structure)
@@ -141,6 +152,7 @@ def test_full_pipeline_with_extraction():
     title = "Head coach leaves north London club after eight months in charge following 2-1 defeat to Newcastle"
     
     source_name = "BBC Sport"
+    source_type = "MEDIA"
     publish_date = "2025-02-12"
     
     print(f"\nSource: {source_name}")
@@ -193,7 +205,7 @@ def test_full_pipeline_with_extraction():
     # ========================================================================
     print("\n[STEP 3] Formatting blocks for event decomposition...")
     
-    blocks = format_semantic_blocks_for_decomposition(chunks, source_name, title, publish_date)
+    blocks = format_semantic_blocks_for_decomposition(chunks, source_name, source_type, title, publish_date)
     print(f"  ✓ Formatted {len(blocks)} blocks for decomposition")
     
     # ========================================================================
@@ -334,6 +346,7 @@ def test_transfer_news():
     title = "Arsenal Wins EFL Cup Quarter-Final Against Crystal Palace on Penalties"
     
     source_name = "West Ham Official"
+    source_type = "OFFICIAL"
     publish_date = "2025-01-09"
     
     print(f"\nSource: {source_name}")
@@ -355,7 +368,7 @@ def test_transfer_news():
         preview = ' '.join(chunk.sentences)
         print(f"  • Chunk {chunk.chunk_id} ({chunk.chunk_type}): {preview}")
     
-    blocks = format_semantic_blocks_for_decomposition(chunks, source_name, title, publish_date)
+    blocks = format_semantic_blocks_for_decomposition(chunks, source_name, source_type, title, publish_date)
     print(f"[STEP 3] Formatted {len(blocks)} blocks for decomposition")
     
     # Event Decomposition
