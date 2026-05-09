@@ -141,6 +141,80 @@
 
 换句话说，本系统的价值主要体现在“减少错误自信”，这对足球新闻这类高时效、易冲突场景更重要。
 
+### 7.5.5 端到端实例展示：West Ham 签约 Castellanos
+
+为了更直观展示“示例新闻 → 抽取事件 → 图谱节点 → 问答结果”的链路，本节给出一个理想化示例。该示例用于论文展示流程，不作为严格量化实验结论。
+
+#### （1）输入新闻（简化）
+
+> West Ham United is delighted to announce the signing of Argentina international forward Taty Castellanos. Born in Mendoza and capped twice by his country, Castellanos won the MLS Cup and Golden Boot with New York City FC in 2021 before netting four goals in a single game for Girona against Real Madrid in La Liga in 2023.
+
+从语义上看，这段新闻同时包含“当前事件（签约）”与“背景履历（过往荣誉/表现）”两类信息，适合作为两阶段抽取示例。
+
+#### （2）理想化抽取事件结果
+
+在预处理分块后，系统可将该段文本拆分为两个主要事件单元：
+
+1. **事件 E1（主事件）**：West Ham 完成对 Taty Castellanos 的签约；
+2. **事件 E2（背景事件）**：球员过往成绩（2021 MLS Cup & Golden Boot；2023 对皇马单场四球）。
+
+对应结构化事件（示意）：
+
+- `event_id`: `news-xxx-block001:e001`
+	- `event_description`: West Ham sign forward Taty Castellanos
+	- `participants`: West Ham United（CLUB）, Taty Castellanos（PLAYER）
+	- `constraints`: PLAYER_MOVEMENT / CONTRACT_SIGNING
+	- `sources`: Premier League Official
+
+- `event_id`: `news-xxx-block001:e002`
+	- `event_description`: Castellanos has notable achievements in MLS and La Liga
+	- `participants`: Taty Castellanos, New York City FC, Girona, Real Madrid
+	- `constraints`: CAREER_ACHIEVEMENT / PERFORMANCE_RECORD
+	- `temporal_anchors`: 2021, 2023
+
+这个结果体现了两阶段抽取的优势：主事件和背景事件被拆开，后续验证与问答不会混成一段“过于冗长的综合描述”。
+
+#### （3）图谱节点与关系落库示意
+
+当事件进入图谱层后，可形成如下核心节点与关系：
+
+- 事件节点：
+	- `(:Event {event_id: e001, fact_type: EVENT, ...})`
+	- `(:Event {event_id: e002, fact_type: EVENT, ...})`
+
+- 实体节点：
+	- `(:Entity {name: "West Ham United", type: "CLUB"})`
+	- `(:Entity {name: "Taty Castellanos", type: "PLAYER"})`
+	- `(:Entity {name: "New York City FC", type: "CLUB"})`
+	- `(:Entity {name: "Girona", type: "CLUB"})`
+	- `(:Entity {name: "Real Madrid", type: "CLUB"})`
+
+- 关系示意：
+	- `(e001)-[:INVOLVES]->(West Ham United)`
+	- `(e001)-[:INVOLVES]->(Taty Castellanos)`
+	- `(e001)-[:CONSTRAINS]->(:ConstraintAnchor {type:"PLAYER_MOVEMENT"})`
+	- `(e001)-[:REPORTED_BY]->(:Source {name:"Premier League Official"})`
+	- `(e002)-[:INVOLVES]->(Taty Castellanos)`
+	- `(e002)-[:CONSTRAINS]->(:ConstraintAnchor {type:"CAREER_ACHIEVEMENT"})`
+
+在该示例中，E1 和 E2 既可独立回答问题，也可在分析模式中被组合为“签约合理性背景”证据链。
+
+#### （4）问答结果示例（GraphRAG）
+
+假设用户问题为：
+
+> “West Ham 新签的 Castellanos 是什么类型球员？他过往表现如何？”
+
+理想化回答（示意）：
+
+> 根据图谱中的签约事件，West Ham 已签下阿根廷前锋 Taty Castellanos。该事件属于球员转会/签约类型。作为背景证据，图谱还记录了 Castellanos 在 2021 年随 New York City FC 获得 MLS Cup 并拿到 Golden Boot，以及 2023 年代表 Girona 对阵 Real Madrid 单场打入四球。这些信息表明他既具备终结能力，也有较强比赛影响力。
+
+在证据可追溯层面，该回答可回指到 `e001`（签约事实）和 `e002`（履历事实）两个事件节点，避免了“只给结论、不见依据”的黑盒生成问题。
+
+#### （5）示例讨论
+
+这个案例说明：同一段新闻如果不做事件拆分，问答阶段很容易出现“主事实与背景事实混淆”。通过对象契约与图谱分层表示，系统可以把“签约是否发生”与“球员历史表现”分开存储、按需组合，从而提升回答的准确性与解释性。这也印证了本文方法路线的核心价值：先结构化事实，再生成自然语言。
+
 ---
 
 ## 7.6 误差分析与讨论
